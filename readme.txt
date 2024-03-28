@@ -29,9 +29,38 @@ List network interfaces in given subscriptions with IP address, VNet name, netwo
 
 Usage:
 Get-ConnectedNICs [-subscriptionFilter <filterexpression>] [-outFile <outfilename>] [-noPing]
+
 -subscriptionFilter	mandatory parameter, list NICs in subscriptions matching the filter
 -outFile	writes results to a semicolon-separated CSV format if this parameter is given
 -noPing	skips testing whether the NIC is responding to a ping
+
+-------------------------------------------------------------------------------
+
+Get-FileAccesses
+================
+Purpose:
+provides count and size statistics about file extensions and ages on file storages
+
+Usage:
+Get-FileAccesses  ServerName <servername> [ ShareName <sharename>] [ onAccess] [ noAges] [ noExtensions] [ Priority (BelowNormal | Normal | AboveNormal | High | Realtime)]
+
+-ServerName     Mandatory, evaluates data on given share(s) of <servername>
+-ShareName	     Analyzes files on the given share.
+                If omitted, analyzes data on all non-hidden shares of the given server.
+-onAccess	     Uses lastAccess for age calculation.
+                If omitted, uses lastWrite for age calculation
+-noAges	     Ignores file age, lists by extensions only (if  noExtensions is not given)
+-noExtensions   Ignores extensions, lists by age only (if  noAge is not given)
+                If BOTH  no... switches are given, script only returns total file count and size
+-Priority       Starts process with given priority. Use with care.
+                Possible values are BelowNormal | Normal | AboveNormal | High | Realtime
+
+Examples:
+to list file count and size by age, based on last accessed date'
+Get-FileAccesses -ServerName myserver -ShareName myshare -onAccess -noExtensions
+
+to see all properties in table format, use ft  Property *
+Get-FileAccesses  ServerName myserver  ShareName myshare | ft  Property *
 
 -------------------------------------------------------------------------------
 
