@@ -36,6 +36,24 @@ Get-ConnectedNICs [-subscriptionFilter <filterexpression>] [-outFile <outfilenam
 
 -------------------------------------------------------------------------------
 
+Get-PrinterQueues
+=================
+Purpose:
+Lists all printer queues on all computers matching the filter.
+The <filter> can be a computer name but also include wildcards
+The output will be for the each printer on the matching computer(s),
+name of computer, printer, driver, and printer IP address.
+
+Usage:
+Get-PrinterQueues -filter <filter> [-details] [-ping] [-outFile <outfilename>]
+
+-details  Give additional details for each printer: name of shared printer,
+          location, comment, and port name
+-ping     will try to ping each printer and output an additional field 'IsLive'
+-outFile  if given, exports result into a semicolon-separated CSV file
+
+-------------------------------------------------------------------------------
+
 Get-FileAccesses
 ================
 Purpose:

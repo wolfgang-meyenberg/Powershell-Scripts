@@ -16,10 +16,12 @@ if ($help) {
     "    Get-VirtualNetworks -subscriptionFilter <filterexpression> [-details] [-excludeSubnets] [-outFile <filepath>]"
     ""
     "-subscriptionFilter"
-    "    mandatory parameter. Lists all VNets and subnet names with IP address range for the subscriptions matching the filter"
+    "    mandatory parameter. Lists all VNets and subnet names with IP address"
+    "    range for the subscriptions matching the filter"
     ""
     "-details"
-    "    additionally lists max number of hosts, netmask, min and max available IP addresses for each network"
+    "    additionally lists max number of hosts, netmask, minimum and maximum"
+    "    available IP addresses for each network"
     ""
     "-excludeSubnets"
     "    list only VNets rather than VNets including their subnets"
@@ -64,20 +66,6 @@ function AddressPrefixToNet ($prefix)
     $($prefix.Replace('{','').replace('}','') -split '/')[0]
 }
 
-function OutputSubnetInfo ([string] $addressPrefix)
-{
-    $network = AddressPrefixToNet ($addressPrefix)
-    $prefix = AddressPrefixToPrefix($addressPrefix)
-    $netmask = Int64ToIPString(AddressPrefixToMask ($prefix))
-
-    $int64Address = IPStringToInt64($network)
-    $hostMin = Int64ToIPString($int64Address + 1)
-
-    $numhosts = [bigint]::Pow(2, 32-$prefix) - 2
-    $hostmax = Int64ToIPString($int64Address + $numhosts)
-    "$network;/$prefix;$numhosts;$netmask;$hostMin;$hostmax"
-}
-
 # ========== BEGIN MAIN ================
 
 if ($subscriptionFilter -ne '*') {
@@ -95,32 +83,32 @@ $result = $(
             $addressRanges = ''
             foreach ($addrPrefix in $VNet.AddressSpace.AddressPrefixes) {
                 $addressPrefix = $addrPrefix.Replace('{','').replace('}','')
-                $network = AddressPrefixToNet ($addressPrefix)
-                $prefix = AddressPrefixToPrefix($addressPrefix)
-                $netmask = Int64ToIPString(AddressPrefixToMask ($prefix))
-                $int64Address = IPStringToInt64($network)
-                $hostMin = Int64ToIPString($int64Address + 1)
-                $numhosts = [bigint]::Pow(2, 32-$prefix) - 2
-                $hostmax = Int64ToIPString($int64Address + $numhosts)
+                $network       = AddressPrefixToNet ($addressPrefix)
+                $prefix        = AddressPrefixToPrefix($addressPrefix)
+                $netmask       = Int64ToIPString(AddressPrefixToMask ($prefix))
+                $int64Address  = IPStringToInt64($network)
+                $hostMin       = Int64ToIPString($int64Address + 1)
+                $numhosts      = [bigint]::Pow(2, 32-$prefix) - 2
+                $hostmax       = Int64ToIPString($int64Address + $numhosts)
                 if ($details) {
                     [PSCustomObject]@{
                         Subscription = $($subscription.Name)
-                        VNet = $($VNet.Name)
-                        Subnet = '*'
-                        Network	=$network
-                        Prefix = $prefix
+                        VNet     = $($VNet.Name)
+                        Subnet   = '*'
+                        Network	 = $network
+                        Prefix   = $prefix
                         NumHosts = $numhosts
-                        Netmask	= $netmask
-                        HostMin	= $hostmin
-                        HostMax	= $hostmax
+                        Netmask	 = $netmask
+                        HostMin	 = $hostmin
+                        HostMax	 = $hostmax
                     }
                 } else {
                     [PSCustomObject]@{
                         Subscription = $($subscription.Name)
-                        VNet =$($VNet.Name)
-                        Subnet = '*'
-                        Network	=$network
-                        Prefix = $prefix
+                        VNet    = $($VNet.Name)
+                        Subnet  = '*'
+                        Network	= $network
+                        Prefix  = $prefix
                     }
                 }
             }
@@ -128,39 +116,39 @@ $result = $(
                 foreach ($subnet in $VNet.Subnets) {
                     $addressPrefix = $subnet.AddressPrefix.Replace('{','').replace('}','')
                     $network = AddressPrefixToNet ($addressPrefix)
-                    $prefix = AddressPrefixToPrefix($addressPrefix)
+                    $prefix  = AddressPrefixToPrefix($addressPrefix)
                     $netmask = Int64ToIPString(AddressPrefixToMask ($prefix))
                     if ($details) {
-                        $hostMin = Int64ToIPString($int64Address + 1)
+                        $hostMin  = Int64ToIPString($int64Address + 1)
                         $numhosts = [bigint]::Pow(2, 32-$prefix) - 2
-                        $hostmax = Int64ToIPString($int64Address + $numhosts)
+                        $hostmax  = Int64ToIPString($int64Address + $numhosts)
                     }
                     if ($details) {
                         [PSCustomObject]@{
                             Subscription = $($subscription.Name)
-                            VNet =$($VNet.Name)
-                            Subnet =$($subnet.Name)
-                            Network	=$network
-                            Prefix = $prefix
-                            NumHosts = $numhosts
-                            Netmask	= $netmask
-                            HostMin	= $hostmin
-                            HostMax	= $hostmax
+                            VNet         = $($VNet.Name)
+                            Subnet       = $($subnet.Name)
+                            Network	     = $network
+                            Prefix       = $prefix
+                            NumHosts     = $numhosts
+                            Netmask	     = $netmask
+                            HostMin	     = $hostmin
+                            HostMax	     = $hostmax
                         }
                     } else {
                         [PSCustomObject]@{
                             Subscription = $($subscription.Name)
-                            VNet =$($VNet.Name)
-                            Subnet =$($subnet.Name)
-                            Network	=$network
-                            Prefix = $prefix
+                            VNet         = $($VNet.Name)
+                            Subnet       = $($subnet.Name)
+                            Network	     = $network
+                            Prefix       = $prefix
                         }
                     }
                 }
             }
         }
     }
-)
+) | Sort-Object -Property Subscription, VNet, Subnet
 
 if ($outFile) {
     $result | Export-Csv -Delimiter ";" -Path $outFile -NoTypeInformation

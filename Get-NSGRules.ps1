@@ -40,7 +40,7 @@ if ($help) {
 ############
 # a class that defines an interval of integers
 # a single integer is represented by an interval where upper and lower bounds are equal
-# the assumption is that lower bound < upper boundis always true, otherwise results are unpredictable
+# the assumption is that lower bound < upper bound is always true, otherwise results are undefined
 #
 class Int32Interval {
     [Int32] $lowerBound

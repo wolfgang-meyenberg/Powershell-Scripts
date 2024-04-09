@@ -25,7 +25,7 @@ if ($help) {
 function DiskSkuToSkuName ($tier, $size)
 {
     if ($tier -eq $null) {
-        $SkuName = "X"
+        $SkuName = "X"  # we can't identify the tier
     } elseif ($tier.substring(0,7) -eq "Premium") {
         $SkuName = "P"
     } elseif ($tier.substring(0,5) -eq "Ultra")  {
@@ -64,7 +64,6 @@ function DiskSkuToSkuName ($tier, $size)
     } else {
         $SkuName += "80"
     }
-
     $SkuName
 }
 
@@ -87,7 +86,6 @@ foreach ($subscription in $subscriptions) {
             }
         if ($disks) {
             $vmDisks = ($vm|select -ExpandProperty StorageProfile).DataDisks
-
             $DiskType = $vm.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
             $DiskSize = $vm.StorageProfile.OsDisk.DiskSizeGB
             $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
