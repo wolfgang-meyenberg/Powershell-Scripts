@@ -31,7 +31,7 @@ Usage:
 Get-ConnectedNICs [-subscriptionFilter <filterexpression>] [-outFile <outfilename>] [-noPing]
 
 -subscriptionFilter	mandatory parameter, list NICs in subscriptions matching the filter
--outFile	writes results to a semicolon-separated CSV format if this parameter is given
+-outFile	writes results to a semicolon-separated CSV file if this parameter is given
 -noPing	skips testing whether the NIC is responding to a ping
 
 -------------------------------------------------------------------------------
@@ -104,11 +104,12 @@ Purpose:
 Lists the VMs, their SKU and their disks
 
 Usage:
-Get-VirtualMachineSizes -subscriptionFilter <filterexpression> [-disks [-aggregate]]
+Get-VirtualMachineSizes -subscriptionFilter <filterexpression> [-disks [-aggregate]] [-outFile <outfilename>]
 
 -subscriptionFilter	list VMs in matching subscriptions
 -disks			also shows disk information
 -aggregate			aggregates disks by SKUs, requires -disks
+-outFile	           writes results to a semicolon-separated CSV format
 
 -------------------------------------------------------------------------------
 
@@ -121,7 +122,7 @@ Usage:
 Get-VirtualNetworks -subscriptionFilter <filterexpression> [-outFile <outfilename>] [-excludeSubnets]
 
 -subscriptionFilter	mandatory. Lists networks in subscriptions matching the filter
--outFile			writes output into semicolon-separated CSV format
+-outFile			writes output into semicolon-separated CSV file
 -excludeSubnets		will only list VNets, not subnets
 
 

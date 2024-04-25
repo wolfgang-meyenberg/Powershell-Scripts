@@ -4,6 +4,8 @@ Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,
     [Parameter(ParameterSetName="default", Position=1)] [switch] $disks,
     [Parameter(ParameterSetName="default", Position=2)] [switch] $aggregate,
+    [Parameter(ParameterSetName="default", Position=3)] [switch] $asString,
+    [Parameter(ParameterSetName="default", Position=4)] [string] $outFile = '',
     [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
 )
 
@@ -12,13 +14,16 @@ if ($help) {
     "    Get-VirtualMachineSizes"
     ""
     "SYNTAX"
-    "    Get-VirtualMachineSizes -subscriptionFilter <filterexpression> [-disks [-aggregate]]"
+    "    Get-VirtualMachineSizes -subscriptionFilter <filterexpression> [-disks [-aggregate | -asString]]"
     ""
-    "    Returns a list of all subscriptions, virtual machines, their SKU, IP addresses, and SKUs of attached disks"
-    "    in subscriptions matching the filter"
+    "    Returns a list of all subscriptions, virtual machines, their SKU, IP addresses,"
+    "    and SKUs of attached disks in subscriptions matching the filter"
     ""
     "    -disks     also shows the disk SKUs"
     "    -aggregate aggregates disks by SKUs, requires -disks"
+    "    -asString  aggregates disks by SKUs and order, requires -disks"
+    "    -outFile   if given, exports result into a semicolon-separated CSV file"
+    ""
     exit
 }
 
@@ -75,50 +80,101 @@ if ($subscriptionFilter -ne '*') {
 
 $subscriptions = Get-AzSubscription | Where-Object {$_.Name -like $subscriptionFilter} | Sort-Object -Property Name
 
-foreach ($subscription in $subscriptions) {
-    Select-AzSubscription $subscription | Out-Null
-    foreach ($VM in $(Get-AzVM | Sort-Object -Property Name)) {
-        $VmSku = ($vm | select -ExpandProperty HardwareProfile).VmSize -replace "Standard_"
-        $item = [PSCustomObject] @{
-                Subscription = $($subscription.Name)
-                Name         = $($VM.Name)
-                Sku          = $VmSku
-            }
-        if ($disks) {
-            $vmDisks = ($vm|select -ExpandProperty StorageProfile).DataDisks
-            $DiskType = $vm.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
-            $DiskSize = $vm.StorageProfile.OsDisk.DiskSizeGB
-            $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
-            $item | Add-Member -MemberType NoteProperty -Name 'OsDisk' -Value $Sku
+$result = $(
+    foreach ($subscription in $subscriptions) {
+        Select-AzSubscription $subscription | Out-Null
+        foreach ($VM in $(Get-AzVM | Sort-Object -Property Name)) {
+            $VmSku = ($vm | select -ExpandProperty HardwareProfile).VmSize -replace "Standard_"
+            $item = [PSCustomObject] @{
+                    Subscription = $($subscription.Name)
+                    Name         = $($VM.Name)
+                    Sku          = $VmSku
+                }
+            if ($disks) {
+                $vmDisks = ($vm|select -ExpandProperty StorageProfile).DataDisks
+                $DiskType = $vm.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
+                $DiskSize = $vm.StorageProfile.OsDisk.DiskSizeGB
+                $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
+                $item | Add-Member -MemberType NoteProperty -Name 'OsDisk' -Value $Sku
 
-            if ($aggregate) {
-                $lastSku = ''
-                $diskSkuCount = 0
-                foreach ($disk in $VmDisks) {
-                    $DiskType = $disk.ManagedDisk.StorageAccountType
-                    $DiskSize = $disk.DiskSizeGB
-                    $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
-                    if ($Sku -ne $lastSku) {
-                        $diskSkuCount++
-                        $diskCount = 1
-                        $diskPropertyName = 'DataDiskSku' + $diskSkuCount
-                        $item | Add-Member -MemberType NoteProperty -Name $diskPropertyName -Value $($diskCount.ToString() + 'x' + $Sku)
-                        $lastSku = $Sku
-                    } else {
-                        $diskCount++
-                        $item.$diskPropertyName = $($diskCount.ToString() + 'x' + $Sku)
+                if ($aggregate) {
+                    $lastSku = ''
+                    $diskSkuCount = 0
+                    foreach ($disk in $VmDisks) {
+                        $DiskType = $disk.ManagedDisk.StorageAccountType
+                        $DiskSize = $disk.DiskSizeGB
+                        $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
+                        if ($Sku -ne $lastSku) {
+                            $diskSkuCount++
+                            $diskCount = 1
+                            $diskPropertyName = 'DataDiskSku' + $diskSkuCount
+                            $item | Add-Member -MemberType NoteProperty -Name $diskPropertyName -Value $($diskCount.ToString() + 'x' + $Sku)
+                            $lastSku = $Sku
+                        } else {
+                            $diskCount++
+                            $item.$diskPropertyName = $($diskCount.ToString() + 'x' + $Sku)
+                        }
                     }
+                } elseif ($asString) {
+                    $lastSku = ''
+                    $diskString = ''
+                    foreach ($disk in $VmDisks) {
+                        $DiskType = $disk.ManagedDisk.StorageAccountType
+                        $DiskSize = $disk.DiskSizeGB
+                        $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
+                        if ($Sku -eq $lastSku) {
+                            $diskCount++
+                        } else {
+                            if ($diskString -ne '') { $diskString += " + " }
+                            if ($lastSku -ne '') { $diskString += $($diskCount.ToString() + 'x' + $lastSku) }
+                            $diskCount = 1
+                            $lastSku = $Sku
+                        }
+                    }
+                    if ($diskString -ne '') { $diskString += " + " }
+                    if ($lastSku -ne '') { $diskString += $($diskCount.ToString() + 'x' + $lastSku) }
+                    $item | Add-Member -MemberType NoteProperty -Name "Disks" -Value $diskString
+                } else {
+                    $diskSkus = @()
+                    foreach ($disk in $VmDisks) {
+                        $DiskType = $disk.ManagedDisk.StorageAccountType
+                        $DiskSize = $disk.DiskSizeGB
+                        $diskSkus += (DiskSkuToSkuName $DiskType $DiskSize)
+                    }
+                    $item | Add-Member -MemberType NoteProperty -Name 'DataDisks' -Value $diskSkus
                 }
-            } else {
-                $diskSkus = @()
-                foreach ($disk in $VmDisks) {
-                    $DiskType = $disk.ManagedDisk.StorageAccountType
-                    $DiskSize = $disk.DiskSizeGB
-                    $diskSkus += (DiskSkuToSkuName $DiskType $DiskSize)
-                }
-                $item | Add-Member -MemberType NoteProperty -Name 'DataDisks' -Value $diskSkus
             }
+            $item
         }
-        $item
     }
+)
+
+if ($outFile) {
+    # the "DataDisks" member is an array, but we want that to be expanded
+    # so we need to do some manual magic here
+    $(
+        "Subscription;Name;Sku;OsDisk;DataDisks"
+        foreach ($item in $result) {
+            $line = ''
+            foreach ($memberName in ($item.psobject.properties | select -ExpandProperty Name)) {
+                $member = $item.$memberName
+
+                if ($member.GetType().IsArray) {
+                    foreach ($element in $member) {
+                        if ($line -ne '') { $line += ';' }
+                        $line += $element
+                    }
+                } else {
+                    if ($line -ne '') { $line += ';' }
+                    $line += $member
+                }
+            }
+            $line
+        }
+    ) | Out-File $outFile
+} else {
+    $enumLimit = $Global:FormatEnumerationLimit
+    $Global:FormatEnumerationLimit = -1
+    $result
+    $Global:FormatEnumerationLimit = $enumLimit
 }
