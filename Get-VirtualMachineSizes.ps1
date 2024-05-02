@@ -91,18 +91,36 @@ $result = $(
                     Sku          = $VmSku
                 }
             if ($disks) {
-                $vmDisks = ($vm|select -ExpandProperty StorageProfile).DataDisks
+                # get info about OS disk
+                $OsDisk = Get-AzDisk -DiskName $vm.StorageProfile.OsDisk.Name
+                $DiskType = $OsDisk.Sku.Name
+                $DiskSize = $OsDisk.DiskSizeGB
+                $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
+
+<#        
                 $DiskType = $vm.StorageProfile.OsDisk.ManagedDisk.StorageAccountType
                 $DiskSize = $vm.StorageProfile.OsDisk.DiskSizeGB
                 $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
+#>
+
                 $item | Add-Member -MemberType NoteProperty -Name 'OsDisk' -Value $Sku
+
+                # get info about data disks
+                $vmDisks = $vm.StorageProfile.DataDisks
 
                 if ($aggregate) {
                     $lastSku = ''
                     $diskSkuCount = 0
                     foreach ($disk in $VmDisks) {
+<#
+
                         $DiskType = $disk.ManagedDisk.StorageAccountType
                         $DiskSize = $disk.DiskSizeGB
+#>
+                        $DataDisk = Get-AzDisk -DiskName $disk.Name
+                        $DiskType = $DataDisk.Sku.Name
+                        $DiskSize = $DataDisk.DiskSizeGB
+
                         $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
                         if ($Sku -ne $lastSku) {
                             $diskSkuCount++
@@ -119,8 +137,9 @@ $result = $(
                     $lastSku = ''
                     $diskString = ''
                     foreach ($disk in $VmDisks) {
-                        $DiskType = $disk.ManagedDisk.StorageAccountType
-                        $DiskSize = $disk.DiskSizeGB
+                        $DataDisk = Get-AzDisk -DiskName $disk.Name
+                        $DiskType = $DataDisk.Sku.Name
+                        $DiskSize = $DataDisk.DiskSizeGB
                         $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
                         if ($Sku -eq $lastSku) {
                             $diskCount++
@@ -137,8 +156,9 @@ $result = $(
                 } else {
                     $diskSkus = @()
                     foreach ($disk in $VmDisks) {
-                        $DiskType = $disk.ManagedDisk.StorageAccountType
-                        $DiskSize = $disk.DiskSizeGB
+                        $DataDisk = Get-AzDisk -DiskName $disk.Name
+                        $DiskType = $DataDisk.Sku.Name
+                        $DiskSize = $DataDisk.DiskSizeGB
                         $diskSkus += (DiskSkuToSkuName $DiskType $DiskSize)
                     }
                     $item | Add-Member -MemberType NoteProperty -Name 'DataDisks' -Value $diskSkus
