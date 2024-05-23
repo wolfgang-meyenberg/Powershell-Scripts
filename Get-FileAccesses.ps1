@@ -16,7 +16,7 @@ if ($help) {
     'provides count and size statistics about file extensions and ages on file storages'
     ''
     'USAGE'
-    'Get-FileAccesses -ServerName <servername> [-ShareName <sharename>] [-onAccess] [-noAges] [-noExtensions] [-Priority (BelowNormal | Normal | AboveNormal | High | Realtime)]'
+    'Get-FileAccesses -serverName <servername> [-shareName <sharename>] [-onAccess] [-noAges] [-noExtensions] [-priority (BelowNormal | Normal | AboveNormal | High | Realtime)]'
     '    -ServerName   Mandatory, evaluates data on given share(s) of <servername>'
     '    -ShareName    Analyzes files on the given share.'
     '                  If omitted, analyzes data on all non-hidden shares of the given server.'
@@ -76,15 +76,21 @@ $accessFileCounts =  @(@{},@{},@{},@{},@{},@{},@{},@{},@{},@{})
 $accessFileSizesMB =  @(@{},@{},@{},@{},@{},@{},@{},@{},@{},@{})
 $allExtensions = @()
 
-if ($ShareName -eq '*') {
-    $Shares = (net view $ServerName | Where-Object { ($_ -match '\sDisk\s') -or ($_ -match '\sPlatte\s') }) -replace '\s\s+', ',' | ForEach-Object{ ($_ -split ',')[0] }
+if ($shareName -eq '*') {
+    $shares = (net view "\\$serverName" | Where-Object { ($_ -match '\sDisk\s') -or ($_ -match '\sPlatte\s') }) -replace '\s\s+', ',' | ForEach-Object{ ($_ -split ',')[0] }
 } else {
-    $Shares = ,$ShareName     # the leading comma makes this a (one-item) array
+    $shares = ,$shareName     # the leading comma makes this a (one-item) array
 }
+
+$countSh = 0
 
 foreach ($share in $Shares) {
     $accessFileCounts =  @(@{},@{},@{},@{},@{},@{},@{},@{},@{},@{})
     $accessFileSizesMB =  @(@{},@{},@{},@{},@{},@{},@{},@{},@{},@{})
+    $countSh++
+
+    Write-Progress -Id 1 -PercentComplete $($countSh * 100 / $Shares.count) -Status 'iterating through shares on server $Servername' -Activity "analyzing share $share ($countSh of $($Shares.count))"
+    
     Get-ChildItem -Path "\\$Servername\$share" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
         if (! $_.PSIsContainer) {
             # skip directories, count only files
@@ -164,3 +170,4 @@ foreach ($share in $Shares) {
         $result
     }
 } # for each share
+Write-Progress -Id 1 -Activity "analyzing shares" -Completed

@@ -26,7 +26,7 @@ if (($VMType.Length + $DiskType.Length -eq 0) -or ($help)) {
     ""
     "    If the -AHB switch is given, prices are given without Windows license (i.e. using Azure Hybrid Benefit)"
     ""
-    "    Get-AzurePrice -VMType [...] displays estimated monthly fee for a given disk type"
+    "    Get-AzurePrice -DiskType [...] displays estimated monthly fee for a given disk type"
     "    <disktype>     must be written exactly as in the price table, including proper capitalization, e.g. ""E10"" or ""S20"""
     "    <redundancy>   is either LRS or ZRS, default is LRS"
     "    <currency>     can be any valid three-letter currency code, default value is EUR"

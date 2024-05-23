@@ -15,7 +15,7 @@ Get-AzurePrice -VMType [...] displays estimated monthly fee for a given VM type
 -Currency		can be any valid three-letter currency code, default value is EUR
 -AHB			gives prices without Windows license (i.e. using Azure Hybrid Benefit)
 
-Get-AzurePrice -VMType [...] displays estimated monthly fee for a given disk type
+Get-AzurePrice -DiskType [...] displays estimated monthly fee for a given disk type
 -Disktype		must be written exactly as in the price table, including proper capitalization, e.g. "E10" or "S20"
 -Redundancy	is either LRS or ZRS, default is LRS
 -Currency		can be any valid three-letter currency code, default value is EUR
@@ -60,17 +60,17 @@ Purpose:
 provides count and size statistics about file extensions and ages on file storages
 
 Usage:
-Get-FileAccesses  ServerName <servername> [ ShareName <sharename>] [ onAccess] [ noAges] [ noExtensions] [ Priority (BelowNormal | Normal | AboveNormal | High | Realtime)]
+Get-FileAccesses  serverName <servername> [-shareName <sharename>] [-onAccess] [-noAges] [-noExtensions] [-priority (BelowNormal | Normal | AboveNormal | High | Realtime)]
 
--ServerName     Mandatory, evaluates data on given share(s) of <servername>
--ShareName	     Analyzes files on the given share.
+-serverName     Mandatory, evaluates data on given share(s) of <servername>
+-shareName	     Analyzes files on the given share.
                 If omitted, analyzes data on all non-hidden shares of the given server.
 -onAccess	     Uses lastAccess for age calculation.
                 If omitted, uses lastWrite for age calculation
 -noAges	     Ignores file age, lists by extensions only (if  noExtensions is not given)
 -noExtensions   Ignores extensions, lists by age only (if  noAge is not given)
                 If BOTH  no... switches are given, script only returns total file count and size
--Priority       Starts process with given priority. Use with care.
+-priority       Starts process with given priority. Use with care.
                 Possible values are BelowNormal | Normal | AboveNormal | High | Realtime
 
 Examples:

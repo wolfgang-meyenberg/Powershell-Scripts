@@ -67,6 +67,8 @@ function AddressPrefixToNet ($prefix)
 }
 
 # ========== BEGIN MAIN ================
+#
+#
 
 if ($subscriptionFilter -ne '*') {
     $subscriptionFilter = "*$subscriptionFilter*"
@@ -74,23 +76,29 @@ if ($subscriptionFilter -ne '*') {
 
 $subscriptions = Get-AzSubscription | Where-Object {$_.Name -like $subscriptionFilter}
 
+$countS = 0 # used for progress bar
 
+# the result for each subscription and VNet is returned as a PSCustomObject
+# we want all results in an array, so that we later process or export them
 $result = $(
     foreach ($subscription in $subscriptions) {
         Select-AzSubscription $subscription | Out-Null
+        $countS++
+        Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status 'iterating through subscriptions' -Activity "analyzing subscription $countS of $($subscriptions.count)"
         $VNets = Get-AzVirtualNetwork
         foreach ($VNet in $VNets) {
             $addressRanges = ''
             foreach ($addrPrefix in $VNet.AddressSpace.AddressPrefixes) {
+                # get some basic informationabout each VNet
                 $addressPrefix = $addrPrefix.Replace('{','').replace('}','')
                 $network       = AddressPrefixToNet ($addressPrefix)
                 $prefix        = AddressPrefixToPrefix($addressPrefix)
-                $netmask       = Int64ToIPString(AddressPrefixToMask ($prefix))
                 $int64Address  = IPStringToInt64($network)
-                $hostMin       = Int64ToIPString($int64Address + 1)
-                $numhosts      = [bigint]::Pow(2, 32-$prefix) - 2
-                $hostmax       = Int64ToIPString($int64Address + $numhosts)
                 if ($details) {
+                    $netmask       = Int64ToIPString(AddressPrefixToMask ($prefix))
+                    $hostMin       = Int64ToIPString($int64Address + 1)
+                    $numhosts      = [bigint]::Pow(2, 32-$prefix) - 2
+                    $hostmax       = Int64ToIPString($int64Address + $numhosts)
                     [PSCustomObject]@{
                         Subscription = $($subscription.Name)
                         VNet     = $($VNet.Name)
@@ -148,6 +156,7 @@ $result = $(
             }
         }
     }
+    Write-Progress -Id 1 -Activity "analyzing subscription" -Completed
 ) | Sort-Object -Property Subscription, VNet, Subnet
 
 if ($outFile) {

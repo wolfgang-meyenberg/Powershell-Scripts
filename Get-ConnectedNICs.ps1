@@ -56,8 +56,8 @@ function OutputSubnetInfo ([string] $addressPrefix)
 }
 
 # ========== BEGIN MAIN ================
-
-
+#
+#
 if ($help) {
     "NAME"
     "    Get-ConnectedNICs"
@@ -80,6 +80,8 @@ if ($subscriptionFilter -ne '*') {
 
 $subscriptions = Get-AzSubscription | Where-Object {$_.Name -like $subscriptionFilter}
 
+# the result for each VM is returned as a PSCustomObject
+# we want all results in an array, so that we later process or export them
 $result = $(
     foreach ($subscription in $subscriptions | Sort-Object -Property Name) {
         Select-AzSubscription $subscription | Out-Null
@@ -91,13 +93,22 @@ $result = $(
                 $prefix = AddressPrefixToPrefix($addressPrefix)
                 $NicCount = 0
                 foreach ($IpConfiguration in $subnet.IpConfigurations) {
+                    # the 'Id' member has the format
+                    # /subscriptions/<guid>/resourceGroups/<rgname>/providers/Microsoft.Network/networkInterfaces/<nicname>/ipConfigurations/<configname>
+                    # we split that by the slashes and are only interested in the parts <rgname> and <nicname>, which are the parts 4 and 8, respectively
                     $IpId = ($IpConfiguration.Id) -split '/'
+                    # get the NIC using its name and resource group
                     $Nic = Get-AzNetworkInterface -ResourceGroupName $IpId[4] -Name $IpId[8] -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
                     if ($Nic -eq $null -or $Nic.VirtualMachine -eq $null) {
+                        # there may be no NIC, or the NIC may not be attached to a VM
                         continue
                     }
                     $NicCount++
+                    # the NIC has a reference to the VM it is attached to, the reference has a member 'Id', the of which is
+                    # /subscriptions/<guid>/resourceGroups/<rgname>/providers/Microsoft.Compute/virtualMachines/<vmname>,
+                    # and we are only interested in the <vmname>, which is part 8
                     $VmName = ($nic.VirtualMachine.Id -split '/')[8]
+                    # try top see whether this VM is known to DNS
                     $DnsRec=Resolve-DnsName $VmName -QuickTimeout -ErrorAction Ignore
                     If ($DnsRec -ne $null) {
                         $DnsName = $DnsRec.Name
@@ -105,6 +116,7 @@ $result = $(
                         $DnsName = '(none)'
                     }
                     foreach ($NicIpCfg in $Nic.IpConfigurations) {
+                        # a NIC may have more than one IP address, so iterate
                         $NicIP = $NicIpCfg.PrivateIPAddress
                         if (-not $noPing) {
                             $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue).PingSucceeded
@@ -120,6 +132,7 @@ $result = $(
                                 IsLive = $Live
                             }
                         } else {
+                            # we don't want to PING, so skip that member
                             [PSCustomObject]@{
                                 Subscription = $($subscription.Name)
                                 VNet = $($VNet.Name)

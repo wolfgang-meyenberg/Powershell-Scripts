@@ -1,7 +1,7 @@
 ﻿[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
-    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $filter,
+    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $computerFilter,
     [Parameter(ParameterSetName="default", Position=1)] [switch] $details,
     [Parameter(ParameterSetName="default", Position=2)] [switch] $ping,
     [Parameter(ParameterSetName="default", Position=3)] [string] $outFile,
@@ -16,7 +16,10 @@ if ($help) {
     "    name of computer, printer, driver, and printer IP address."
     ""
     "Usage:"
-    "    Get-PrinterQueues -filter <filter> [-details] [-ping] [-outFile <outfilename>]"
+    "    Get-PrinterQueues -computerFilter <filter> [-details] [-ping] [-outFile <outfilename>]"
+    "    -computerFilter"
+    "        name(s) of computer(s) whose queues shall be displayed. Filter may contain wildcards"
+    ""
     "    -details"
     "        Give additional details for each printer: name of shared printer, location,"
     "        comment, and port name"
@@ -30,16 +33,19 @@ if ($help) {
     exit
 }
 
-$computerNames = (Get-ADComputer -Filter ("Name -like '" + $filter +"'")).Name
+$computerNames = (Get-ADComputer -Filter ("Name -like '*" + $computerFilter +"*'")).Name
 if (-not $computerNames.GetType().IsArray) {
     $computerNames = ,$computerNames
 }
 
 if ($outFile) { Remove-Item -Path $outFile -Force -ErrorAction SilentlyContinue -WarningAction SilentlyContinue }
 
+$countC = 0
 foreach ($computerName in $computerNames) {
-    $printers = Get-Printer -ComputerName $computerName
-    $printerPorts = Get-PrinterPort -ComputerName $computerName
+    $countC++
+    Write-Progress -Id 1 -PercentComplete $($countC * 100 / $computerNames.count) -Status 'iterating through computers' -Activity "analyzing printers on computer $countC of $($computernames.count)"
+    $printers = Get-Printer -ComputerName $computerName -ErrorAction SilentlyContinue
+    $printerPorts = Get-PrinterPort -ComputerName $computerName -ErrorAction SilentlyContinue
     foreach ($printer in $printers) {
         $portName = $printer.PortName
         $printerPort = $printerPorts | Where-Object -Property Name -EQ $portName

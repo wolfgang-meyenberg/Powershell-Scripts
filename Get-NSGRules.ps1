@@ -116,8 +116,7 @@ class Int32Interval {
     
     # returns the Interval in a string of format <lowerbound>-<upperbound>
     [string]ToString() {
-        if ($this.lowerBound -eq $this.upperBound)
-        {
+        if ($this.lowerBound -eq $this.upperBound) {
             return $this.lowerBound
         } else {
             return $this.lowerBound.ToString() + "-" + $this.upperBound.ToString()
@@ -148,9 +147,9 @@ class Int32Interval {
 # of any existing interval(s), then all these matches are merged into one Interval
 # In any case, the list is sorted
 # examples:
-#    [10-12], [15-18] + [2-4] --> [2-4], [10-12], [15-18]
-#    [10-12], [15-18] + [19-20] --> [10-12], [15-20]
-#    [10-12], [15-18] + [13-14] --> [10-18]
+#    [10-12], [15-18] + [2-4] --> [2-4], [10-12], [15-18]  (no overlaps)
+#    [10-12], [15-18] + [19-20] --> [10-12], [15-20]       (2nd and 3rd interval are adjacent and hence merged)
+#    [10-12], [15-18] + [13-14] --> [10-18]                (all intervals are adjacent and hence merged)
 #
 class Int32IntervalList {
     [Int32Interval[]] $theList
@@ -170,7 +169,7 @@ class Int32IntervalList {
         do {
             if ( ($j -lt $this.theList.Count) -and
                  ( $this.theList[$i].Expand($this.theList[$j]) ) ) {
-                # "Expand returned $true, so item #j was successfully merged into item #i
+                # "Expand" returned $true, so item #j was successfully merged into item #i
                 # we then proceed to try the next larger interval
                 $j++
             } else {
@@ -206,7 +205,6 @@ class Int32IntervalList {
         }
         return $ret + '}'
     }
-
 }
 
 # convert a list of ranges in the format of e.g. '10-12,3,53,100-110, 4-7' into an Interval List [3-7],[10-12],[100-110]
@@ -222,7 +220,8 @@ function Rangelist2IntervalList([array]$rangeList, [bool]$reset, [Int32IntervalL
 }
 
 # ============ BEGIN MAIN PROGRAM ============
-
+#
+#
 $subscriptions = Get-AzSubscription | Where-Object {$_.Name -like "*$subscriptionFilter*"}
 
 foreach ($subscription in $subscriptions) {
