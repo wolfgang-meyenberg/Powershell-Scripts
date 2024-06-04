@@ -98,18 +98,23 @@ Get-NSGRules -subscriptionFilter <filterexpression> [-details | -briefDetails]
 
 -------------------------------------------------------------------------------
 
-Get-VirtualMachineSizes
+Get-VirtualMachineInfo
 =======================
 Purpose:
 Lists the VMs, their SKU and their disks
 
 Usage:
-Get-VirtualMachineSizes -subscriptionFilter <filterexpression> [-disks [-aggregate]] [-outFile <outfilename>]
+Get VirtualMachineInfos  subscriptionFilter <filterexpression> [-disks [-asString]] [-ipAddresses] [-ping] [-outFile <filename> [-separator <separator>]]
+Get VirtualMachineInfos  subscriptionFilter <filterexpression>  all [-asString] [-outFile <filename>]
 
--subscriptionFilter	list VMs in matching subscriptions
--disks			also shows disk information
--aggregate			aggregates disks by SKUs, requires -disks
--outFile	           writes results to a semicolon-separated CSV format
+Returns a list of all subscriptions, virtual machines, their SKU, IP addresses, and SKUs of attached disks in subscriptions matching the filter
+ all	includes  disks,  ipAddresses,  ping
+ disks	show OS and data disk SKUs
+ asString	shows the disks in an aggregated string format
+ ipAddresses	show IP address(es)
+ ping	ping VM to see whether it is live
+ outFile	if given, exports result into a CSV file
+ separator	separator for items in CSV file, default is semicolon
 
 -------------------------------------------------------------------------------
 

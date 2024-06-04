@@ -2,25 +2,34 @@
 
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,
+    [Parameter(ParameterSetName="default")] [switch] $all,
     [Parameter(ParameterSetName="default", Position=1)] [switch] $disks,
-    [Parameter(ParameterSetName="default", Position=2)] [switch] $aggregate,
-    [Parameter(ParameterSetName="default", Position=3)] [string] $outFile = '',
+    [Parameter(ParameterSetName="default", Position=2)] [switch] $asString,
+    [Parameter(ParameterSetName="default", Position=3)] [switch] $ipAddresses,
+    [Parameter(ParameterSetName="default", Position=4)] [switch] $ping,
+    [Parameter(ParameterSetName="default", Position=5)] [string] $outFile = '',
+    [Parameter(ParameterSetName="default", Position=6)] [string] $separator = ';',
     [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
 )
 
 if ($help) {
     "NAME"
-    "    Get-VirtualMachineSizes"
+    "    Get-VirtualMachineInfos"
     ""
     "SYNTAX"
-    "    Get-VirtualMachineSizes -subscriptionFilter <filterexpression> [-disks [-aggregate]] [-outFile <filename>]"
+    "    Get-VirtualMachineInfos -subscriptionFilter <filterexpression> [-disks [-asString]] [-ipAddresses] [-ping] [-outFile <filename> [-separator <separator>]]"
+    "    Get-VirtualMachineInfos -subscriptionFilter <filterexpression> -all [-outFile <filename>]"
     ""
     "    Returns a list of all subscriptions, virtual machines, their SKU, IP addresses,"
     "    and SKUs of attached disks in subscriptions matching the filter"
     ""
-    "    -disks     also shows the disk SKUs"
-    "    -aggregate returns disk count grouped by SKUs, requires -disks"
-    "    -outFile   if given, exports result into a semicolon-separated CSV file"
+    "    -all          includes -disks, -ipAddresses, -ping"
+    "    -disks        show OS and data disk SKUs"
+    "    -asString     shows the disks in an aggregated string format"
+    "    -ipAddresses  show IP address(es)"
+    "    -ping         ping VM to see whether it is live"
+    "    -outFile      if given, exports result into a CSV file"
+    "    -separator    separator for items in CSV file, default is semicolon"
     ""
     exit
 }
@@ -78,8 +87,14 @@ if ($subscriptionFilter -ne '*') {
     $subscriptionFilter = "*$subscriptionFilter*"
 }
 
+if ($all) {,
+    $disks = $true
+    $ipAddresses = $true
+    $ping = $true
+}
+
 $subscriptions = Get-AzSubscription | Where-Object {$_.Name -like $subscriptionFilter} | Sort-Object -Property Name
-    
+
 $countS = 0 # used for progress bar
 
 # the result for each VM is returned as a PSCustomObject
@@ -99,7 +114,7 @@ $result = $(
                     Name         = $($VM.Name)
                     Sku          = $VmSku
                 }
-            if ($disks -or $aggregate) {
+            if ($disks) {
                 $countVM++
                 Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMs.count) -Status 'iterating through VMs' -Activity "analyzing disks for VM $countVM of $($VMs.count)"
                 # we want to display information about the VM attached disks as well
@@ -114,39 +129,52 @@ $result = $(
                 # now, get info about data disks
                 $vmDisks = $vm.StorageProfile.DataDisks
 
-                if ($aggregate) {
-                    # we don't want data for each disk individually, but just the different SKUs and their count
-                    $lastSku = ''
-                    $diskString = ''
-                    foreach ($disk in $VmDisks) {
-                        $DataDisk = Get-AzDisk -DiskName $disk.Name
-                        $DiskType = $DataDisk.Sku.Name
-                        $DiskSize = $DataDisk.DiskSizeGB
-                        $Sku = (DiskSkuToSkuName $DiskType $DiskSize)
-                        if ($Sku -eq $lastSku) {
-                            $diskCount++
+                # return all disk SKUs in an array
+                $diskSkus = @()
+                foreach ($disk in $VmDisks) {
+                    $DataDisk = Get-AzDisk -DiskName $disk.Name
+                    $DiskType = $DataDisk.Sku.Name
+                    $DiskSize = $DataDisk.DiskSizeGB
+                    $diskSkus += (DiskSkuToSkuName $DiskType $DiskSize)
+                }
+                if (-not $asString) {
+                    $item | Add-Member -MemberType NoteProperty -Name 'DataDisks' -Value $diskSkus
+                } else {
+                    #aggregate diskSkus and convert into a string
+                    $aggregatedDisks = @{}
+                    foreach ($diskSku in $diskSkus) {
+                        if ($aggregatedDisks.ContainsKey($diskSku)) {
+                            $aggregatedDisks[$diskSku] ++
                         } else {
-                            if ($diskString -ne '') { $diskString += " + " }
-                            if ($lastSku -ne '') { $diskString += $($diskCount.ToString() + 'x' + $lastSku) }
-                            $diskCount = 1
-                            $lastSku = $Sku
+                            $aggregatedDisks[$diskSku] = 1
                         }
                     }
-                    if ($diskString -ne '') { $diskString += " + " }
-                    if ($lastSku -ne '') { $diskString += $($diskCount.ToString() + 'x' + $lastSku) }
-                    $item | Add-Member -MemberType NoteProperty -Name "Disks" -Value $diskString
-                } else {
-                    # return all disk SKUs in an array
-                    $diskSkus = @()
-                    foreach ($disk in $VmDisks) {
-                        $DataDisk = Get-AzDisk -DiskName $disk.Name
-                        $DiskType = $DataDisk.Sku.Name
-                        $DiskSize = $DataDisk.DiskSizeGB
-                        $diskSkus += (DiskSkuToSkuName $DiskType $DiskSize)
+                    $diskString = ''
+                    # the sort expression sorts SKUs by letter and then by number.
+                    # The -f expression ensures that e.g. 2 comes before 10, otherwise string sort would apply
+                    foreach ($diskSku in ($aggregatedDisks.Keys | Sort-Object -property {$_[0] + "{0:d2}" -f [Int32]$_.Substring(1)} )) {
+                        if ($diskString -ne '') { $diskString += " + " }
+                        $diskString += $aggregatedDisks[$diskSku].ToString() + "x" + $diskSku
                     }
-                    $item | Add-Member -MemberType NoteProperty -Name 'DataDisks' -Value $diskSkus
+                    $item | Add-Member -MemberType NoteProperty -Name 'DataDisks' -Value $diskString
                 }
                 Write-Progress -Id 2 -ParentId 1 -PercentComplete 0 -Status 'iterating through VMs' -Activity 'analyzing VM disks'
+            }
+            if ($ipAddresses) {
+                $nicIds = $VM.NetworkProfile.NetworkInterfaces | select Id
+                $nicString = ''
+                foreach ($nicId in $nicIds) {
+                    $nic = Get-AzNetworkInterface -ResourceId $nicId.Id
+                    foreach ($ipConfiguration in $nic.IpConfigurations) {
+                        if ($nicString -ne '') { $nicString += "," }
+                        $nicString += $ipConfiguration.PrivateIpAddress
+                    }
+                }
+                $item | Add-Member -MemberType NoteProperty -Name 'IpAddresses' -Value $nicString
+                if ($ping) {
+                    $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue).PingSucceeded
+                    $item | Add-Member -MemberType NoteProperty -Name 'IsLive' -Value $Live
+                }
             }
             $item
         }
@@ -168,7 +196,7 @@ if (-not $outFile) {
     # The "DataDisks" member is an array, but we want that to be expanded
     # so we need to do some manual magic here
     $(
-        "Subscription;Name;Sku;OsDisk;DataDisks"
+        "Subscription${separator}Name${separator}Sku${separator}OsDisk${separator}DataDisks"
         foreach ($item in $result) {
             $line = ''
             foreach ($memberName in ($item.psobject.properties | select -ExpandProperty Name)) {
@@ -178,12 +206,12 @@ if (-not $outFile) {
                     # if the property is an array (i.e. the 'DataDisks' property), iterate through its elements
                     # and add them to the $line string
                     foreach ($element in $member) {
-                        if ($line -ne '') { $line += ';' }
+                        if ($line -ne '') { $line += $separator }
                         $line += $element
                     }
                 } else {
                     # otherwise add the property value to the $line string
-                    if ($line -ne '') { $line += ';' }
+                    if ($line -ne '') { $line += $separator }
                     $line += $member
                 }
             }
