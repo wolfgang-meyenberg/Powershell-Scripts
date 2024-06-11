@@ -104,13 +104,14 @@ Purpose:
 Lists the VMs, their SKU and their disks
 
 Usage:
-Get VirtualMachineInfos  subscriptionFilter <filterexpression> [-disks [-asString]] [-ipAddresses] [-ping] [-outFile <filename> [-separator <separator>]]
-Get VirtualMachineInfos  subscriptionFilter <filterexpression>  all [-asString] [-outFile <filename>]
+Get VirtualMachineInfos -subscriptionFilter <filterexpression> [-disks [-asString | -aggregatedString] [-ipAddresses] [-ping] [-outFile <filename> [-separator <separator>]]
+Get VirtualMachineInfos  subscriptionFilter <filterexpression>  all [-asString | -aggregatedString] [-outFile <filename> [-separator <separator>]]
 
 Returns a list of all subscriptions, virtual machines, their SKU, IP addresses, and SKUs of attached disks in subscriptions matching the filter
  all	includes  disks,  ipAddresses,  ping
  disks	show OS and data disk SKUs
- asString	shows the disks in an aggregated string format
+ asString          shows the disks in string format
+ aggregatedString  shows the disks in an aggregated string format
  ipAddresses	show IP address(es)
  ping	ping VM to see whether it is live
  outFile	if given, exports result into a CSV file
