@@ -115,12 +115,20 @@ if ($subscriptionFilter -ne '*') {
     $subscriptionFilter = "*$subscriptionFilter*"
 }
 
-# get all subscriptions matching filter
-$subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -like $subscriptionFilter} | Sort-Object -Property Name
+try {
+    $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -like $subscriptionFilter} | Sort-Object -Property Name
+}
+catch {
+    if ($PSItem.Exception.Message -like '*Connect-AzAccount*') {
+        throw "you are not logged on to Azure. Run Connect-AzAccount before running this script."
+    } else {
+        throw $PSItem.Exception
+    }
+}
 
-# catch error
 if ($subscriptions -eq $null) {
-    Write-Warning "Warning: you are not logged in to Azure or no matching subscription found"
+    "no subscriptions matching this filter found."
+    exit
 }
 
 $countS = 0 # used for progress bar
