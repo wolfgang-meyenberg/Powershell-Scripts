@@ -13,8 +13,9 @@ Param (
     [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
 )
 
+
 #######################
-# display usage help amnd exit
+# display usage help and exit
 #
 if ($help) {
     "NAME"

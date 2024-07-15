@@ -1,0 +1,502 @@
+﻿[CmdletBinding(DefaultParameterSetName = 'default')]
+
+Param (
+    [Parameter(ParameterSetName="default", Mandatory, Position=0)]
+    [Parameter(ParameterSetName="WhatIf", Mandatory, Position=0)]
+    [Parameter(ParameterSetName="defaultAll", Mandatory, Position=0)] [string[]] $subscriptionFilter,
+    [Parameter(ParameterSetName="default")] [switch] $VMs,
+    [Parameter(ParameterSetName="default")] [switch] $SqlServer,
+    [Parameter(ParameterSetName="default")] [switch] $DbAas,
+    [Parameter(ParameterSetName="default")] [switch] $Storage,
+    [Parameter(ParameterSetName="default")] [switch] $Snapshot,
+    [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [switch] $ResourceList,
+    [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [switch] $details,
+    [Parameter(ParameterSetName="defaultAll")] [switch] $all,
+    [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [string] $outFile,
+    [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [string] $separator = ';',
+    [Parameter(ParameterSetName="help", Mandatory)] [Alias("h")] [switch] $help,
+    [Parameter(ParameterSetName="WhatIf")] [switch] $WhatIf
+)
+# ft -Property @{e='*'; width=10}
+
+
+# necessary modules:
+# Azure
+# SQLServer
+
+#######################
+# display usage help and exit
+#
+if ($help) {
+    "NAME"
+    "    Get-AzureResourceData"
+    ""
+    "SYNTAX"
+    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details]] [-outFile <filename> [-separator]]"
+    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  [-ResourceList [-details]] [-outFile <filename> [-separator]]"
+    ""
+    "    Returns a list of resources of selected type(s) in selected subscription(s), along with some properties and metrics"
+    ""
+    "    -subscriptionFilter single filter or comma-separated list of filters. All subscriptions whose name"
+    "                        contain the filter expression will be analysed."
+    "    -VMs                show VMs and their properties"
+    "    -SqlServer          show SQL server VM properties"
+    "    -DbAas              show Azure SQL (databases aaS)"
+    "    -Storage            show storage accounts"
+    "    -Snapshot           show snapshots"
+    "    -all                all of the above switches"
+    "    -ResourceList       show count of resource types in subscription"
+    "    -details            show list of resources in subscription"
+    "    -outFile            if given, exports result into a CSV file"
+    "                        NOTE: separate files will be created for different resource types."
+    "                        Two charachers will be added to the file names to make them different."
+    "    -separator          separator for items in CSV file, default is semicolon"
+    "    -WhatIf             Just display the names of the subscriptions which would be analysed"
+    ""
+    "    NOTE: you may adjust this script e.g. to add or remove metrics. These parts of the code"
+    "          are marked with # >>>>> and # <<<<<. refer to the comments for further information."
+    exit
+}
+
+
+########
+# some values which we use as scales.
+[Int64] $SCALE_KILO = 1024
+[Int64] $SCALE_MEGA = 1048576
+[Int64] $SCALE_GIGA = 1073741824
+
+################################
+# some function definitions first.
+# for main program, see further down
+
+#######
+# extract some data from an array of VM metrics and add them to a PSObject
+# The metric reults will be added as new properties to an existing object 
+# of type PSCustomObject.
+# For each metric, the maximum and average values of the last 24 hours will be added.
+#
+# parameters:
+#    $psObject      Object of type PSCustomObject. The metric results will be added
+#                   as additional properties to that object
+#    $resourceId    ID of the resource of which the metrics will be collected
+#    $metric        The metric to be collected. If the metric collection fails,
+#                   a warning will be issued and the metric values will be 'n/a'
+#    $propertyName  The base name of the property to be added.
+#                   As For each metric, max and average values will be added, *two* properties
+#                   will be added with names Max<propertyName> and Avg<propertyName>
+#    SCALE         Optional. Scale factor for metric, reported value will be divided by <scale>,
+#                   which e.g. makes sense for memory reported in bytes to be output as GB.
+#                   Default is 1
+#    $maxThreshold  Optional. If given, reports the percentage of data points where the metric
+#                   value is larger than <maxThreshold> % of the absolute 24-hour maximum
+#
+function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [string]$propertyName, [Int64]$scale = 1, [Int64]$maxThreshold = 0) {
+    # use data points from last 24 hours
+    $endTime=Get-Date
+    $startTime=$endTime.AddDays(-1)
+    try {
+        $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Maximum -MetricName $metric).Data 2>$null
+        if ($data -eq $null -or $data.Count -eq 0) {
+            # metric calls may fail because metric doesn't exist for this resource, insufficenr credentials, and oter reasons
+            throw "metric exists but returned no data"
+        }
+        # data will contain the max values with one-minute granularity.
+        # we also want to know the absolute maximum of the last 24 hours
+        $max = $($data | Measure-Object -Property Maximum -Maximum).Maximum
+        # add the value as new property to the object
+        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value $([math]::Truncate($max / $scale))
+        if ($maxThreshold -ne 0) {
+            # determine percentage of events (=minutes) where the max load 
+            # was larger than <maxThreshold> of the 24-hour maximum
+            $overThreshold = [math]::Truncate(100 * $($data | Where-Object -Property Maximum -GE ($maxThreshold * $max / 100) | select -Property Maximum).Count / $data.Count)
+            $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value $overThreshold
+        }
+        # data will contain the average values with one-minute granularity
+        $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Average -MetricName $metric).Data 2>$null
+        # determine 24 hour average
+        $avg = $($data | Measure-Object -Property Average -Average).Average
+        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value $([math]::Truncate($avg / $scale))
+    }
+    catch {
+        Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `                        " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
+                        "The error was ""$($_.Exception.InnerException.Body.Message)""." )
+            # add dummy values. some queries may fail only for some resources, in that case, still all objects should have the same fields
+        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value 'n/a'
+        if ($maxThreshold -ne 0) {
+            $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value 'n/a'
+        }
+        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value 'n/a'
+    }
+}
+
+#############
+# display progress information while collecting metrics
+function DisplayMetricProgress ([Int64] $item, [Int64] $total) {
+    Write-Progress -Id 3 -ParentId 2 -PercentComplete $(100*$item/$total) -Status "analyzing metric $item of $total" -Activity 'analyzing metrics'
+}
+
+
+# ################# BEGIN MAIN #################
+#
+#
+
+
+# do some magic with the switch parameters
+#
+
+# the -all switch includes all details except ResourceList
+if ($all) {,
+    $VMs = $true
+    $SqlServer = $true
+    $DbAas = $true
+    $Storage = $true
+    $Snapshot = $true
+}
+
+
+# always use wildcards for subscription filters
+for ($i = 0; $i -lt $subscriptionFilter.Count; $i++) {
+    if ($subscriptionFilter[$i] -ne '*') {
+        $subscriptionFilter[$i] = '*' + $subscriptionFilter[$i] + '*'
+    }
+}
+
+# user may have given more than one filter
+# we collect all subscription names matching any of the filter expressions
+$subscriptionNames = @{}
+foreach ($filter in $subscriptionFilter) {
+    foreach ($subscription in $(Get-AzSubscription | Where-Object {$_.Name -like "*$filter*"})) {
+        $subscriptionNames[$subscription.Name] = 0
+    }
+}
+
+# next command may fail if we haven't logged on to Azure first
+try {
+    $subscriptions = $(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -in $($subscriptionNames.Keys)}) | Sort-Object -Property Name
+}
+catch {
+    if ($PSItem.Exception.Message -like '*Connect-AzAccount*') {
+        throw "you are not logged on to Azure. Run Connect-AzAccount before running this script."
+    } else {
+        # something else was in the way
+        throw $PSItem.Exception
+    }
+}
+if ($subscriptions -eq $null) {
+    "no subscriptions matching this filter found."
+    exit
+}
+
+# check -WhatIf switch. This would only display the names of the subscriptions
+# which would be analysed
+if ($whatIf) {
+    $subscriptions | Select-Object -Property Name
+    exit
+}
+
+$countS = 0 # used for progress bar
+
+# initialize collector arrays
+$VM_Result       = @()
+$SQL_Result      = @()
+$DBaaS_Result    = @()
+$Storage_Result  = @()
+$Resource_Result = @()
+
+# We iterate through all subscriptions:
+# In the innter loop(s), we iterate through a specific resource type, and possible some dependent resources (e.g. VMs and then their disks).
+# In the inner loops, note the lines reading:  $xyz_Result += $( ...
+# The data for each individual resource (sizes, metrics, etc.) are collected into objects of type [PSCustomObject].
+# The output of the script shall be a list of these objects, so that the script output can be piped into some further process.
+# As these objects will have properties which depend on the object type, we collect the objects of a certain type first.
+# The objects will be generated inside the $(...) block and then stored in the $xyz_result variable, which will be an array of objects. 
+#
+foreach ($subscription in $subscriptions) {
+    Select-AzSubscription $subscription | Out-Null
+    $countS++ # count for 1st level progress bar
+    Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "analyzing subscription $countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'iterating through subscriptions'
+    if ($VMs) {
+        $VM_Result += $( 
+            $VMResources = @(Get-AzVM | Sort-Object -Property Name)
+            $countVM = 0 # count for 2nd level progress bar
+            foreach ($VM in $VMResources) {
+                $countVM++
+                Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMResources.count) -Status "analyzing VM $countVM of $($VMResources.count) ($($VM.Name))" -Activity 'analyzing VMs'
+                # make SKU names a little shorter, so delete the 'Standard_' part from the SKU
+                $VmSku = ($VM | select -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
+                # we also want CPU count and RAM size
+                $VmSize = Get-AzVMSize -VMName $VM.Name -ResourceGroupName $VM.ResourceGroupName | Where-Object -p Name -EQ $VM.HardwareProfile.VmSize
+                # and, we need to collect info about data disks
+                $vmDisks = @($VM.StorageProfile.DataDisks)
+                $dataDiskCount = 0
+                $totaldataDiskSizeGB = 0
+                foreach ($disk in $VmDisks) {
+                    $dataDiskCount++
+                    Write-Progress -Id 3 -ParentId 2 -PercentComplete $(100*$dataDiskCount/$($vmDisks.Count)) -Status "analyzing disk $dataDiskCount of $($vmDisks.Count)" -Activity 'analyzing disks'
+                    $DataDisk = Get-AzDisk -DiskName $disk.Name
+                    $totaldataDiskSizeGB += $DataDisk.DiskSizeGB
+                }
+
+                # create a PSCustomObject
+                # if we need to report more details (see 'if' statements below), then the object will be extended as necessary
+                $item = [PSCustomObject] @{
+                        Type = "VM"
+                        Subscription   = $($subscription.Name)
+                        Name           = $($VM.Name)
+                        Sku            = $VmSku
+                        CPUs           = $($VmSize.NumberOfCores)
+                        MemGB          = [Math]::Truncate($($VmSize.MemoryInMB) / 1024)
+                        OsType         = $($VM.StorageProfile.OsDisk.OsType)
+                        OsVersion      = $($VM.StorageProfile.ImageReference.Offer)
+                        OsExactVersion = $($VM.StorageProfile.ImageReference.ExactVersion)
+                        OsDiskSize     = $(Get-AzDisk -DiskName $VM.StorageProfile.OsDisk.Name).DiskSizeGB
+                        MaxDisks       = $($VmSize.MaxDataDiskCount)
+                        DataDisks      = $dataDiskCount
+                        DataDisksSize  = $totaldataDiskSizeGB
+                    }
+
+                # get VM Performance metrics
+# >>>>> THIS SECTION CAN EASILY CHANGED IN CASE YOU NEED DIFFERENT METRICS 
+# >>>>> Collecting metrics takes some time, so you may use the DisplayMetricProgress function
+# >>>>> This is however fuilly optional, you can also delete all calls to DisplayMetricProgress
+                DisplayMetricProgress 1 5
+# >>>>> To add a metric to a resource, call the AddMetrics function.
+# >>>>> See there  for a detailed description of the parameters.
+# >>>>> The next line collects the 'Percentage CPU' metric and adds the MaxCPU and AvgCPU properties to the $item object
+# >>>>> the 1 is the scale factor, and the 80 indcates that we also want a property named MaxPctCPU that shows how many
+# >>>>> minutes of the day the CPU load was higher than 80% of the day's maximal load
+                AddMetrics ([ref]$item) $VM.Id 'Percentage CPU' 'CPU' 1 80
+                DisplayMetricProgress 2 5
+# >>>>> Here, we collect the 'Available Memory Bytes' and add the MaxMemMB and AvgMemMB properties, scaled as MiBytes,
+                AddMetrics ([ref]$item) $VM.Id 'Available Memory Bytes' 'MemMB' $SCALE_MEGA
+                DisplayMetricProgress 3 5
+                AddMetrics ([ref]$item) $VM.Id 'Data Disk Queue Depth' 'DiskQ' 1
+                DisplayMetricProgress 4 5
+                AddMetrics ([ref]$item) $VM.Id 'Network In Total' 'NwInMB' $SCALE_MEGA
+                DisplayMetricProgress 5 5
+                AddMetrics ([ref]$item) $VM.Id 'Network Out Total' 'NwOutMB' $SCALE_MEGA
+# <<<<<
+                # now output the created object with its properties
+                # as we are inside a $..._result += $(...) block, the result will be added to tge $..._result
+                $item
+                Write-Progress -Id 3 -ParentId 2 -Activity 'analyzing metrics' -Completed
+            } # foreach VM
+        )
+    } # if VMs
+
+    if ($SqlServer) {
+        $SqlServerVMs = @(Get-AzSqlVM) # if there is only one, then Get-AzSqlVM returns one server, but we always want an array
+        if ($SqlServerVMs.Count -ne 0) {
+            Write-Progress -Id 2 -ParentId 1 -PercentComplete 50 -Status "analyzing $($SqlServerVMs.Count) SQL Server VMs" -Activity 'analyzing SQL Server VMs'
+            $SQL_Result += $(
+                foreach ($SqlServerVM in $SqlServerVMs) {
+                    $item = [PSCustomObject] @{
+                            Type      = "SQL Server VM"
+                            Subscription      = $($subscription.Name)
+                            SqlVMName         = $SqlServerVM.Name
+                            LicenseType       = $SqlServerVM.LicenseType
+                            Sku               = $SqlServerVM.Sku
+                            SqlManagementType = $SqlServerVM.SqlManagementType
+                    }
+                    $item
+                } # foreach SQL server VM
+            )
+        } # if there are any VMs
+    } # if SQL server
+
+    if ($DbAas) {
+        $DBaaS_Result += $(
+            $AzSqlServers = @(Get-AzSqlServer)
+            foreach ($AzSqlServer in $AzSqlServers) {
+                Write-Progress -Id 2 -ParentId 1 -PercentComplete 50 -Status "analyzing $($AzSqlServers.Count) Azure SQL Servers" -Activity 'Azure aaS-Databases'
+                $SqlDatabases = @(Get-AzSqlDatabase -ServerName $AzSqlServer.ServerName -ResourceGroupName $AzSqlServer.ResourceGroupName)
+                foreach ($SqlDatabase in $SqlDatabases) {
+                    $item = [PSCustomObject] @{
+                            Type  = "SQL DB aaS"
+                            Subscription  = $($subscription.Name)
+                            SqlServerName = $SqlDatabase.ServerName
+                            DatabaseName  = $SqlDatabase.DatabaseName
+                            SkuName       = $SqlDatabase.SkuName
+                            Collation     = $SqlDatabase.CollationName
+                            MaxSizeGB     = $SqlDatabase.MaxSizeBytes / 1048576
+                            Status        = $SqlDatabase.Status
+                            Capacity      = $SqlDatabase.Capacity
+                    }
+                    DisplayMetricProgress 1 5
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'cpu_percent' 'CPUpct' 1
+                    DisplayMetricProgress 2 5
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'dtu_consumption_percent' 'DTUpct' 1
+                    DisplayMetricProgress 3 5
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'dtu_used' 'usedDTU' 1
+                    DisplayMetricProgress 4 5
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'storage' 'usedStorGB' $SCALE_GIGA
+                    DisplayMetricProgress 5 5
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'storage_percent' 'Storpct' 1
+
+                    $item
+
+                } # foreach database
+            } # foreach Azure SQL server
+        )
+    } # if DB aaS
+
+    if ($Storage) {
+        $StorageAccounts = @(Get-AzStorageAccount)
+        if ($StorageAccounts.Count -ne 0) {
+            $countSA = 0
+            $Storage_Result += $(
+                foreach ($StorageAccount in $StorageAccounts) {
+                    $countSA++
+                    Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSA / $StorageAccounts.Count) -Status "analyzing $($countSA) of $($StorageAccounts.Count) Storage Accounts" -Activity 'analyzing Storage Accounts'
+                    $FileShares = @(Get-AzRmStorageShare -StorageAccount $StorageAccount)
+                    foreach ($FileShare in $FileShares) {
+                        $item = [PSCustomObject] @{
+                                Type          = "Storage Account File Share"
+                                Subscription          = $($subscription.Name)
+                                StorageAccountName    = $StorageAccount.StorageAccountName
+                                SaShareName           = $Fileshare.Name
+                                SaShareQuotaGiB       = $Fileshare.QuotaGiB
+                                SaSku                 = $StorageAccount.Sku
+                                SaAccessTier          = $StorageAccount.AccessTier
+                                AllowBlobPublicAccess = $StorageAccount.AllowBlobPublicAccess
+                        }
+                        DisplayMetricProgress 1 3
+                        AddMetrics ([ref]$item) $StorageAccount.Id 'Egress' 'egressGB' $SCALE_GIGA
+                        DisplayMetricProgress 2 3
+                        AddMetrics ([ref]$item) $StorageAccount.Id 'Ingress' 'ingressGB' $SCALE_GIGA
+                        DisplayMetricProgress 3 3
+                        AddMetrics ([ref]$item) $StorageAccount.Id 'Transactions' 'transact' 1
+                        $item
+                    } # foreach fileshare
+                } # foreach storage account
+            )
+        } # if there are any storage accounts
+    } # if Storage
+
+
+    if ($Snapshot) {
+        $Snapshots = @(Get-AzSnapshot)
+        if ($Snapshots.Count -ne 0) {
+            Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSS / $Snapshots.Count) -Status "analyzing $($Snapshots.Count) Snapshots" -Activity 'analyzing Snapshots'
+            $Snapshot_Result += $(
+                foreach ($Snap in $Snapshots) {
+                    $countSS++
+                    $item = [PSCustomObject] @{
+                        Type        = "Snapshot"
+                        Subscription= $($subscription.Name)
+                        Name        = $Snap.Name
+                        Created     = $Snap.TimeCreated
+                        OsType      = $Snap.Ostype
+                        DiskSizeGB  = $Snap.DiskSizeGB
+                        Incremental = $Snap.Incremental
+                    }
+                    $item
+                } # foreach snapshot
+            )
+            Write-Progress -Id 2 -ParentId 2 -Activity 'analyzing Snapshots' -Completed
+        } # if there are any snapshots
+    } # if Snapshot
+
+    if ($ResourceList) {
+        $Resources = @(Get-AzResource)
+        if ($Resources.Count -ne 0) {
+            $countRes = 0
+            if (-not $details) { $resourceCount = @{} }
+            $Resource_Result += $(
+                foreach ($Resource in $Resources) {
+                    $countRes++
+                    Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countRes * 100 / $Resources.count) -Status "analyzing $($Resources.Count) Resources" -Activity 'analyzing Resources'
+                        if ($details) {
+                            # we want to see every resource
+                            $item = [PSCustomObject] @{
+                                    Subscription      = $($subscription.Name)
+                                    Type              = $Resource.ResourceType
+                                    ResourceName      = $Resource.Name
+                                    ResourceGroupName = $Resource.ResourceGroupName
+                            }
+                        } else {
+                            # we want to see just the count of resources by type
+                            $resourceType = $Resource.ResourceType
+                            $resourceCount[$resourceType]++
+                            # test whether this resource type was already seen
+<#
+                            if ($resourceCount[$resourceType] -eq $null) {
+                            } else {
+                            }
+                            $accessFileCounts[$age][$extension] -eq $null -or $accessFileCounts[$age][$extension] -eq 0) {
+#>
+                        }
+                        if ($details) {
+                            # output one item per resource
+                            $item
+                        }
+                } # foreach Resource
+                if (-not $details) {
+                    # output one item per resource type
+                    foreach ($resourceType in $resourceCount.Keys) {
+                        [PSCustomObject] @{
+                            Subscription      = $($subscription.Name)
+                            Type              = $resourceType
+                            ResourceCount     = $resourceCount[$resourceType]
+                        }
+                    }
+                }
+            )
+        } # if count -ne 0
+    } # if $ResourceList
+} # foreach subscription
+Write-Progress -Id 1 -Completed -Activity 'Subscriptions'
+
+
+if (-not $outFile) {
+    # Output to stdout as object
+
+    if ($VMs) {
+        $VM_Result
+    }
+
+    if ($SqlServer) {
+        $SQL_Result
+    }
+
+    if ($DbAas) {
+        $DBaaS_Result
+    }
+
+    if ($Storage) {
+        $Storage_Result
+    }
+
+    if ($Snapshot) {
+        $Snapshot_Result
+    }
+
+    if ($ResourceList) {
+        $Resource_Result | Sort-Object -Property @{Expression="Subscription";Descending=$false},@{Expression="ResourceCount";Descending=$true}
+    }
+} else {
+    if ($VMs -and $VM_Result) {
+        $VM_Result | Export-Csv -Path $($outFile -replace '\.', '_VM.') -Delimiter $separator -NoTypeInformation
+    }
+    if ($SqlServer -and $SQL_Result) {
+        $SQL_Result | Export-Csv -Path $($outFile -replace '\.', '_SQL.') -Delimiter $separator -NoTypeInformation
+    }
+
+    if ($DbAas -and $DBaaS_Result) {
+        $DBaaS_Result | Export-Csv -Path $($outFile -replace '\.', '_DB.') -Delimiter $separator -NoTypeInformation
+    }
+
+    if ($Storage -and $Storage_Result) {
+        $Storage_Result | Export-Csv -Path $($outFile -replace '\.', '_SA.') -Delimiter $separator -NoTypeInformation
+    }
+    if ($Snapshot -and $Snapshot_Result) {
+        $Snapshot_Result | Export-Csv -Path $($outFile -replace '\.', '_SS.') -Delimiter $separator -NoTypeInformation
+    }
+    if ($ResourceList -and $Resource_Result) {
+        $Resource_Result | `            Sort-Object -Property @{Expression="Subscription";Descending=$false},@{Expression="ResourceCount";Descending=$true} | `            Export-Csv -Path $($outFile -replace '\.', '_RL.') -Delimiter $separator -NoTypeInformation
+    }
+}

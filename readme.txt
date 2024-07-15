@@ -131,4 +131,35 @@ Get-VirtualNetworks -subscriptionFilter <filterexpression> [-outFile <outfilenam
 -outFile			writes output into semicolon-separated CSV file
 -excludeSubnets		will only list VNets, not subnets
 
+-------------------------------------------------------------------------------
 
+Get-AzureResourceData
+=====================
+Purpose:
+
+Usage:
+    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details]] [-outFile <filename> [-separator]]
+    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  [-ResourceList [-details]] [-outFile <filename> [-separator]]
+
+    Returns a list of resources of selected type(s) in selected subscription(s), along with some properties and metrics
+
+    -subscriptionFilter single filter or comma-separated list of filters.
+                        all subscriptions whose namematches the filter expression will be analysed.
+    -VMs                show VMs and their properties
+    -SqlServer          show SQL server VM properties
+    -DbAas              show Azure SQL (databases aaS)
+    -Storage            show storage accounts
+    -Snapshot           show snapshots
+    -all                all of the above switches
+    -ResourceList       show count of resource types in subscription
+    -details            show list of resources in subscription
+    -outFile            if given, exports result into a CSV file
+                        NOTE: separate files will be created for different resource types.
+                        Two charachers will be added to the file names to make them different.
+    -separator          separator for items in CSV file, default is semicolon
+    -WhatIf             Just display the names of the subscriptions which would be analysed
+
+    NOTE: you may adjust this script e.g. to add or remove metrics. These parts of the code
+          are marked with # >>>>> and # <<<<<. refer to the comments for further information.
+
+-------------------------------------------------------------------------------
