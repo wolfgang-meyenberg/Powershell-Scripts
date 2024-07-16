@@ -151,6 +151,7 @@ Usage:
     -Storage            show storage accounts
     -Snapshot           show snapshots
     -all                all of the above switches
+    -lastHours          collect metrics within the given time period, default is 24 hours
     -ResourceList       show count of resource types in subscription
     -details            show list of resources in subscription
     -outFile            if given, exports result into a CSV file

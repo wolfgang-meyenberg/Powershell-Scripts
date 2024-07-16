@@ -15,14 +15,14 @@ Param (
     [Parameter(ParameterSetName="defaultAll")] [switch] $details,
     [Parameter(ParameterSetName="defaultAll")] [switch] $all,
     [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [Int32] $lastHours = 24,
+    [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [string] $outFile,
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [string] $separator = ';',
     [Parameter(ParameterSetName="help", Mandatory)] [Alias("h")] [switch] $help,
     [Parameter(ParameterSetName="WhatIf")] [switch] $WhatIf
 )
-# ft -Property @{e='*'; width=10}
-
 
 # necessary modules:
 # Azure
@@ -49,11 +49,12 @@ if ($help) {
     "    -Storage            show storage accounts"
     "    -Snapshot           show snapshots"
     "    -all                all of the above switches"
+    "    -lastHours          collect metrics within the given time period, default is 24 hours"
     "    -ResourceList       show count of resource types in subscription"
     "    -details            show list of resources in subscription"
     "    -outFile            if given, exports result into a CSV file"
     "                        NOTE: separate files will be created for different resource types."
-    "                        Two charachers will be added to the file names to make them different."
+    "                        Two characters will be added to the file names to make them different."
     "    -separator          separator for items in CSV file, default is semicolon"
     "    -WhatIf             Just display the names of the subscriptions which would be analysed"
     ""
@@ -61,7 +62,6 @@ if ($help) {
     "          are marked with # >>>>> and # <<<<<. refer to the comments for further information."
     exit
 }
-
 
 ########
 # some values which we use as scales.
@@ -88,24 +88,24 @@ if ($help) {
 #    $propertyName  The base name of the property to be added.
 #                   As For each metric, max and average values will be added, *two* properties
 #                   will be added with names Max<propertyName> and Avg<propertyName>
-#    SCALE         Optional. Scale factor for metric, reported value will be divided by <scale>,
+#    $scale         Optional. Scale factor for metric, reported value will be divided by <scale>,
 #                   which e.g. makes sense for memory reported in bytes to be output as GB.
 #                   Default is 1
 #    $maxThreshold  Optional. If given, reports the percentage of data points where the metric
 #                   value is larger than <maxThreshold> % of the absolute 24-hour maximum
 #
 function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [string]$propertyName, [Int64]$scale = 1, [Int64]$maxThreshold = 0) {
-    # use data points from last 24 hours
+    # use data points within given period
     $endTime=Get-Date
-    $startTime=$endTime.AddDays(-1)
+    $startTime=$endTime.AddHours(-$lastHours)
     try {
         $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Maximum -MetricName $metric).Data 2>$null
         if ($data -eq $null -or $data.Count -eq 0) {
-            # metric calls may fail because metric doesn't exist for this resource, insufficenr credentials, and oter reasons
+            # metric calls may fail because metric doesn't exist for this resource, insufficent credentials, and oter reasons
             throw "metric exists but returned no data"
         }
         # data will contain the max values with one-minute granularity.
-        # we also want to know the absolute maximum of the last 24 hours
+        # we also want to know the absolute maximum within the given time period
         $max = $($data | Measure-Object -Property Maximum -Maximum).Maximum
         # add the value as new property to the object
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value $([math]::Truncate($max / $scale))
@@ -169,7 +169,7 @@ for ($i = 0; $i -lt $subscriptionFilter.Count; $i++) {
 # we collect all subscription names matching any of the filter expressions
 $subscriptionNames = @{}
 foreach ($filter in $subscriptionFilter) {
-    foreach ($subscription in $(Get-AzSubscription | Where-Object {$_.Name -like "*$filter*"})) {
+    foreach ($subscription in $(Get-AzSubscription | Where-Object {$_.Name -like "*$filter*" -and $_.State -eq 'Enabled'})) {
         $subscriptionNames[$subscription.Name] = 0
     }
 }
@@ -194,7 +194,10 @@ if ($subscriptions -eq $null) {
 # check -WhatIf switch. This would only display the names of the subscriptions
 # which would be analysed
 if ($whatIf) {
+    $endTime=Get-Date
+    $startTime=$endTime.AddHours(-$lastHours)
     $subscriptions | Select-Object -Property Name
+    "collect metrics between $($startTime.ToString((Get-Culture).DateTimeFormat.FullDateTimePattern)) and $($endTime.ToString((Get-Culture).DateTimeFormat.FullDateTimePattern))"
     exit
 }
 
@@ -377,11 +380,10 @@ foreach ($subscription in $subscriptions) {
         } # if there are any storage accounts
     } # if Storage
 
-
     if ($Snapshot) {
         $Snapshots = @(Get-AzSnapshot)
         if ($Snapshots.Count -ne 0) {
-            Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSS / $Snapshots.Count) -Status "analyzing $($Snapshots.Count) Snapshots" -Activity 'analyzing Snapshots'
+            Write-Progress -Id 2 -ParentId 1 -PercentComplete 50 -Status "analyzing $($Snapshots.Count) Snapshots" -Activity 'analyzing Snapshots'
             $Snapshot_Result += $(
                 foreach ($Snap in $Snapshots) {
                     $countSS++
@@ -397,7 +399,7 @@ foreach ($subscription in $subscriptions) {
                     $item
                 } # foreach snapshot
             )
-            Write-Progress -Id 2 -ParentId 2 -Activity 'analyzing Snapshots' -Completed
+            Write-Progress -Id 2 -ParentId 1 -Activity 'analyzing Snapshots' -Completed
         } # if there are any snapshots
     } # if Snapshot
 
