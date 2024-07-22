@@ -65,9 +65,12 @@ if ($help) {
 
 ########
 # some values which we use as scales.
-[Int64] $SCALE_KILO = 1024
-[Int64] $SCALE_MEGA = 1048576
-[Int64] $SCALE_GIGA = 1073741824
+class scale {
+    static [Int64] $unit = 1
+    static [Int64] $kilo = 1024
+    static [Int64] $mega = 1048576
+    static [Int64] $giga = 1073741824
+}
 
 ################################
 # some function definitions first.
@@ -93,15 +96,17 @@ if ($help) {
 #                   Default is 1
 #    $maxThreshold  Optional. If given, reports the percentage of data points where the metric
 #                   value is larger than <maxThreshold> % of the absolute 24-hour maximum
+#    $totals        report the Totals value. Some metrics don't come with meaningful max or avg values,
+#                   but totals should be used.
 #
-function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [string]$propertyName, [Int64]$scale = 1, [Int64]$maxThreshold = 0) {
+function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [string]$propertyName, [Int64]$scale = 1, [Int64]$maxThreshold = 0, [bool]$totals = $false) {
     # use data points within given period
     $endTime=Get-Date
     $startTime=$endTime.AddHours(-$lastHours)
     try {
         $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Maximum -MetricName $metric).Data 2>$null
         if ($data -eq $null -or $data.Count -eq 0) {
-            # metric calls may fail because metric doesn't exist for this resource, insufficent credentials, and oter reasons
+            # metric calls may fail because metric doesn't exist for this resource, insufficent credentials, and other reasons
             throw "metric exists but returned no data"
         }
         # data will contain the max values with one-minute granularity.
@@ -111,15 +116,19 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value $([math]::Truncate($max / $scale))
         if ($maxThreshold -ne 0) {
             # determine percentage of events (=minutes) where the max load 
-            # was larger than <maxThreshold> of the 24-hour maximum
+            # was larger than <maxThreshold> within given time period
             $overThreshold = [math]::Truncate(100 * $($data | Where-Object -Property Maximum -GE ($maxThreshold * $max / 100) | select -Property Maximum).Count / $data.Count)
             $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value $overThreshold
         }
-        # data will contain the average values with one-minute granularity
+        # average
         $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Average -MetricName $metric).Data 2>$null
-        # determine 24 hour average
         $avg = $($data | Measure-Object -Property Average -Average).Average
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value $([math]::Truncate($avg / $scale))
+        if ($totals) {
+            $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Total -MetricName $metric).Data 2>$null
+            $total = $($data | Measure-Object -Property Total -Sum).Sum
+            $psObject.Value | Add-Member -MemberType NoteProperty -Name "Total$propertyName" -Value $([math]::Truncate($total / $scale))
+        }
     }
     catch {
         Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `                        " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
@@ -130,6 +139,9 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
             $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value 'n/a'
         }
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value 'n/a'
+        if ($totals) {
+            $psObject.Value | Add-Member -MemberType NoteProperty -Name "Total$propertyName" -Value 'n/a'
+        }
     }
 }
 
@@ -156,7 +168,6 @@ if ($all) {,
     $Storage = $true
     $Snapshot = $true
 }
-
 
 # always use wildcards for subscription filters
 for ($i = 0; $i -lt $subscriptionFilter.Count; $i++) {
@@ -233,21 +244,11 @@ foreach ($subscription in $subscriptions) {
                 $VmSku = ($VM | select -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
                 # we also want CPU count and RAM size
                 $VmSize = Get-AzVMSize -VMName $VM.Name -ResourceGroupName $VM.ResourceGroupName | Where-Object -p Name -EQ $VM.HardwareProfile.VmSize
-                # and, we need to collect info about data disks
-                $vmDisks = @($VM.StorageProfile.DataDisks)
-                $dataDiskCount = 0
-                $totaldataDiskSizeGB = 0
-                foreach ($disk in $VmDisks) {
-                    $dataDiskCount++
-                    Write-Progress -Id 3 -ParentId 2 -PercentComplete $(100*$dataDiskCount/$($vmDisks.Count)) -Status "analyzing disk $dataDiskCount of $($vmDisks.Count)" -Activity 'analyzing disks'
-                    $DataDisk = Get-AzDisk -DiskName $disk.Name
-                    $totaldataDiskSizeGB += $DataDisk.DiskSizeGB
-                }
-
+                # collect info about data disks
+                $vmDisks = $VM.StorageProfile.DataDisks | Measure-Object -Property DiskSizeGB -Sum
                 # create a PSCustomObject
-                # if we need to report more details (see 'if' statements below), then the object will be extended as necessary
+                # if we need to report more details (see 'AddMetrics' statements below), then the object will be extended as necessary
                 $item = [PSCustomObject] @{
-                        Type = "VM"
                         Subscription   = $($subscription.Name)
                         Name           = $($VM.Name)
                         Sku            = $VmSku
@@ -258,8 +259,9 @@ foreach ($subscription in $subscriptions) {
                         OsExactVersion = $($VM.StorageProfile.ImageReference.ExactVersion)
                         OsDiskSize     = $(Get-AzDisk -DiskName $VM.StorageProfile.OsDisk.Name).DiskSizeGB
                         MaxDisks       = $($VmSize.MaxDataDiskCount)
-                        DataDisks      = $dataDiskCount
-                        DataDisksSize  = $totaldataDiskSizeGB
+                        DataDisks      = $($VmDisks).Count
+                        DataDisksSize  = $($VmDisks).Sum
+
                     }
 
                 # get VM Performance metrics
@@ -275,13 +277,13 @@ foreach ($subscription in $subscriptions) {
                 AddMetrics ([ref]$item) $VM.Id 'Percentage CPU' 'CPU' 1 80
                 DisplayMetricProgress 2 5
 # >>>>> Here, we collect the 'Available Memory Bytes' and add the MaxMemMB and AvgMemMB properties, scaled as MiBytes,
-                AddMetrics ([ref]$item) $VM.Id 'Available Memory Bytes' 'MemMB' $SCALE_MEGA
+                AddMetrics ([ref]$item) $VM.Id 'Available Memory Bytes' 'MemMB' ([scale]::mega)
                 DisplayMetricProgress 3 5
                 AddMetrics ([ref]$item) $VM.Id 'Data Disk Queue Depth' 'DiskQ' 1
                 DisplayMetricProgress 4 5
-                AddMetrics ([ref]$item) $VM.Id 'Network In Total' 'NwInMB' $SCALE_MEGA
+                AddMetrics ([ref]$item) $VM.Id 'Network In Total' 'NwInMB' ([scale]::mega)
                 DisplayMetricProgress 5 5
-                AddMetrics ([ref]$item) $VM.Id 'Network Out Total' 'NwOutMB' $SCALE_MEGA
+                AddMetrics ([ref]$item) $VM.Id 'Network Out Total' 'NwOutMB' ([scale]::mega)
 # <<<<<
                 # now output the created object with its properties
                 # as we are inside a $..._result += $(...) block, the result will be added to tge $..._result
@@ -298,7 +300,6 @@ foreach ($subscription in $subscriptions) {
             $SQL_Result += $(
                 foreach ($SqlServerVM in $SqlServerVMs) {
                     $item = [PSCustomObject] @{
-                            Type      = "SQL Server VM"
                             Subscription      = $($subscription.Name)
                             SqlVMName         = $SqlServerVM.Name
                             LicenseType       = $SqlServerVM.LicenseType
@@ -319,7 +320,6 @@ foreach ($subscription in $subscriptions) {
                 $SqlDatabases = @(Get-AzSqlDatabase -ServerName $AzSqlServer.ServerName -ResourceGroupName $AzSqlServer.ResourceGroupName)
                 foreach ($SqlDatabase in $SqlDatabases) {
                     $item = [PSCustomObject] @{
-                            Type  = "SQL DB aaS"
                             Subscription  = $($subscription.Name)
                             SqlServerName = $SqlDatabase.ServerName
                             DatabaseName  = $SqlDatabase.DatabaseName
@@ -330,18 +330,16 @@ foreach ($subscription in $subscriptions) {
                             Capacity      = $SqlDatabase.Capacity
                     }
                     DisplayMetricProgress 1 5
-                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'cpu_percent' 'CPUpct' 1
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'cpu_percent' 'CPUpct' ([scale]::unit)
                     DisplayMetricProgress 2 5
-                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'dtu_consumption_percent' 'DTUpct' 1
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'dtu_consumption_percent' 'DTUpct' ([scale]::unit)
                     DisplayMetricProgress 3 5
-                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'dtu_used' 'usedDTU' 1
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'dtu_used' 'usedDTU' ([scale]::unit)
                     DisplayMetricProgress 4 5
-                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'storage' 'usedStorGB' $SCALE_GIGA
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'storage' 'usedStorGB' ([scale]::giga)
                     DisplayMetricProgress 5 5
-                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'storage_percent' 'Storpct' 1
-
+                    AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'storage_percent' 'Storpct' ([scale]::unit)
                     $item
-
                 } # foreach database
             } # foreach Azure SQL server
         )
@@ -356,25 +354,21 @@ foreach ($subscription in $subscriptions) {
                     $countSA++
                     Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSA / $StorageAccounts.Count) -Status "analyzing $($countSA) of $($StorageAccounts.Count) Storage Accounts" -Activity 'analyzing Storage Accounts'
                     $FileShares = @(Get-AzRmStorageShare -StorageAccount $StorageAccount)
-                    foreach ($FileShare in $FileShares) {
-                        $item = [PSCustomObject] @{
-                                Type          = "Storage Account File Share"
-                                Subscription          = $($subscription.Name)
-                                StorageAccountName    = $StorageAccount.StorageAccountName
-                                SaShareName           = $Fileshare.Name
-                                SaShareQuotaGiB       = $Fileshare.QuotaGiB
-                                SaSku                 = $StorageAccount.Sku
-                                SaAccessTier          = $StorageAccount.AccessTier
-                                AllowBlobPublicAccess = $StorageAccount.AllowBlobPublicAccess
+                    $item = [PSCustomObject] @{
+                            Subscription = $($subscription.Name)
+                            Name        = $StorageAccount.StorageAccountName
+                            Sku         = $StorageAccount.Sku.Name
+                            Tier        = $StorageAccount.AccessTier
+                            Public      = $StorageAccount.AllowBlobPublicAccess
+                            QuotaGiB    = $($FileShares.QuotaGiB | Measure-Object -sum).Sum
                         }
-                        DisplayMetricProgress 1 3
-                        AddMetrics ([ref]$item) $StorageAccount.Id 'Egress' 'egressGB' $SCALE_GIGA
-                        DisplayMetricProgress 2 3
-                        AddMetrics ([ref]$item) $StorageAccount.Id 'Ingress' 'ingressGB' $SCALE_GIGA
-                        DisplayMetricProgress 3 3
-                        AddMetrics ([ref]$item) $StorageAccount.Id 'Transactions' 'transact' 1
-                        $item
-                    } # foreach fileshare
+                    DisplayMetricProgress 1 3
+                    AddMetrics ([ref]$item) $StorageAccount.Id 'Egress' 'Egress'
+                    DisplayMetricProgress 2 3
+                    AddMetrics ([ref]$item) $StorageAccount.Id 'Ingress' 'Ingress'
+                    DisplayMetricProgress 3 3
+                    AddMetrics ([ref]$item) $StorageAccount.Id 'Transactions' 'Transact' ([scale]::unit) 0 $true
+                    $item
                 } # foreach storage account
             )
         } # if there are any storage accounts
@@ -425,12 +419,6 @@ foreach ($subscription in $subscriptions) {
                             $resourceType = $Resource.ResourceType
                             $resourceCount[$resourceType]++
                             # test whether this resource type was already seen
-<#
-                            if ($resourceCount[$resourceType] -eq $null) {
-                            } else {
-                            }
-                            $accessFileCounts[$age][$extension] -eq $null -or $accessFileCounts[$age][$extension] -eq 0) {
-#>
                         }
                         if ($details) {
                             # output one item per resource
@@ -481,6 +469,10 @@ if (-not $outFile) {
         $Resource_Result | Sort-Object -Property @{Expression="Subscription";Descending=$false},@{Expression="ResourceCount";Descending=$true}
     }
 } else {
+    if (-not $outFile.Contains('.')) {
+        $outFile += '.csv'
+    }
+
     if ($VMs -and $VM_Result) {
         $VM_Result | Export-Csv -Path $($outFile -replace '\.', '_VM.') -Delimiter $separator -NoTypeInformation
     }
