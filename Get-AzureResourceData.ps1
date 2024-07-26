@@ -12,6 +12,8 @@ Param (
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [switch] $ResourceList,
     [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [string] $billingPeriod = '',
+    [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [switch] $details,
     [Parameter(ParameterSetName="defaultAll")] [switch] $all,
     [Parameter(ParameterSetName="default")]
@@ -21,7 +23,7 @@ Param (
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [string] $separator = ';',
     [Parameter(ParameterSetName="help", Mandatory)] [Alias("h")] [switch] $help,
-    [Parameter(ParameterSetName="WhatIf")] [switch] $WhatIf
+    [switch] $WhatIf
 )
 
 # necessary modules:
@@ -36,8 +38,8 @@ if ($help) {
     "    Get-AzureResourceData"
     ""
     "SYNTAX"
-    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details]] [-outFile <filename> [-separator]]"
-    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  [-ResourceList [-details]] [-outFile <filename> [-separator]]"
+    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details] [-billingPeriod]] [-outFile <filename> [-separator]]"
+    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  ..."
     ""
     "    Returns a list of resources of selected type(s) in selected subscription(s), along with some properties and metrics"
     ""
@@ -51,6 +53,7 @@ if ($help) {
     "    -all                all of the above switches"
     "    -lastHours          collect metrics within the given time period, default is 24 hours"
     "    -ResourceList       show count of resource types in subscription"
+    "    -billingPeriod      collect resource cost for given billing period, default is the last month"
     "    -details            show list of resources in subscription"
     "    -outFile            if given, exports result into a CSV file"
     "                        NOTE: separate files will be created for different resource types."
@@ -59,7 +62,7 @@ if ($help) {
     "    -WhatIf             Just display the names of the subscriptions which would be analysed"
     ""
     "    NOTE: you may adjust this script e.g. to add or remove metrics. These parts of the code"
-    "          are marked with # >>>>> and # <<<<<. refer to the comments for further information."
+    "          are marked with # >>>>> and # <<<<<. Refer to the comments for further information."
     exit
 }
 
@@ -98,13 +101,15 @@ class scale {
 #                   value is larger than <maxThreshold> % of the absolute 24-hour maximum
 #    $totals        report the Totals value. Some metrics don't come with meaningful max or avg values,
 #                   but totals should be used.
+#    $timeGrain     Optional. Granularity for taking the metric. Default is 00:01:00 (1 minute).
+#                   Some metrics may support different time grains.
 #
-function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [string]$propertyName, [Int64]$scale = 1, [Int64]$maxThreshold = 0, [bool]$totals = $false) {
+function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [string]$propertyName, [Int64]$scale = 1, [Int64]$maxThreshold = 0, [bool]$totals = $false, [string]$timeGrain = '00:01:00') {
     # use data points within given period
     $endTime=Get-Date
     $startTime=$endTime.AddHours(-$lastHours)
     try {
-        $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Maximum -MetricName $metric).Data 2>$null
+        $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain $timeGrain -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Maximum -MetricName $metric).Data 2>$null
         if ($data -eq $null -or $data.Count -eq 0) {
             # metric calls may fail because metric doesn't exist for this resource, insufficent credentials, and other reasons
             throw "metric exists but returned no data"
@@ -121,11 +126,11 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
             $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value $overThreshold
         }
         # average
-        $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Average -MetricName $metric).Data 2>$null
+        $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain $timeGrain -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Average -MetricName $metric).Data 2>$null
         $avg = $($data | Measure-Object -Property Average -Average).Average
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value $([math]::Truncate($avg / $scale))
         if ($totals) {
-            $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain 00:01:00 -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Total -MetricName $metric).Data 2>$null
+            $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain $timeGrain -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Total -MetricName $metric).Data 2>$null
             $total = $($data | Measure-Object -Property Total -Sum).Sum
             $psObject.Value | Add-Member -MemberType NoteProperty -Name "Total$propertyName" -Value $([math]::Truncate($total / $scale))
         }
@@ -134,13 +139,13 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
         Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `                        " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
                         "The error was ""$($_.Exception.InnerException.Body.Message)""." )
             # add dummy values. some queries may fail only for some resources, in that case, still all objects should have the same fields
-        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value 'n/a'
+        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
         if ($maxThreshold -ne 0) {
-            $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value 'n/a'
+            $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
         }
-        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value 'n/a'
+        $psObject.Value | Add-Member -MemberType NoteProperty -Name "Avg$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
         if ($totals) {
-            $psObject.Value | Add-Member -MemberType NoteProperty -Name "Total$propertyName" -Value 'n/a'
+            $psObject.Value | Add-Member -MemberType NoteProperty -Name "Total$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
         }
     }
 }
@@ -185,6 +190,11 @@ foreach ($filter in $subscriptionFilter) {
     }
 }
 
+if ($billingPeriod -eq '') {
+    $billingPeriod = $((Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM") + '01')
+}
+
+
 # next command may fail if we haven't logged on to Azure first
 try {
     $subscriptions = $(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -in $($subscriptionNames.Keys)}) | Sort-Object -Property Name
@@ -209,6 +219,9 @@ if ($whatIf) {
     $startTime=$endTime.AddHours(-$lastHours)
     $subscriptions | Select-Object -Property Name
     "collect metrics between $($startTime.ToString((Get-Culture).DateTimeFormat.FullDateTimePattern)) and $($endTime.ToString((Get-Culture).DateTimeFormat.FullDateTimePattern))"
+    if ($ResourceList) {
+        "Resource cost collected for billing period $billingPeriod"
+    }
     exit
 }
 
@@ -353,21 +366,22 @@ foreach ($subscription in $subscriptions) {
                 foreach ($StorageAccount in $StorageAccounts) {
                     $countSA++
                     Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSA / $StorageAccounts.Count) -Status "analyzing $($countSA) of $($StorageAccounts.Count) Storage Accounts" -Activity 'analyzing Storage Accounts'
-                    $FileShares = @(Get-AzRmStorageShare -StorageAccount $StorageAccount)
                     $item = [PSCustomObject] @{
                             Subscription = $($subscription.Name)
                             Name        = $StorageAccount.StorageAccountName
                             Sku         = $StorageAccount.Sku.Name
                             Tier        = $StorageAccount.AccessTier
+                            Kind        = $StorageAccount.Kind
                             Public      = $StorageAccount.AllowBlobPublicAccess
-                            QuotaGiB    = $($FileShares.QuotaGiB | Measure-Object -sum).Sum
                         }
-                    DisplayMetricProgress 1 3
+                    DisplayMetricProgress 1 4
                     AddMetrics ([ref]$item) $StorageAccount.Id 'Egress' 'Egress'
-                    DisplayMetricProgress 2 3
+                    DisplayMetricProgress 2 4
                     AddMetrics ([ref]$item) $StorageAccount.Id 'Ingress' 'Ingress'
-                    DisplayMetricProgress 3 3
+                    DisplayMetricProgress 3 4
                     AddMetrics ([ref]$item) $StorageAccount.Id 'Transactions' 'Transact' ([scale]::unit) 0 $true
+                    DisplayMetricProgress 4 4
+                    AddMetrics ([ref]$item) $StorageAccount.Id 'UsedCapacity' 'Usage' ([scale]::unit) 0 $false '01:00:00'
                     $item
                 } # foreach storage account
             )
@@ -401,37 +415,59 @@ foreach ($subscription in $subscriptions) {
         $Resources = @(Get-AzResource)
         if ($Resources.Count -ne 0) {
             $countRes = 0
-            if (-not $details) { $resourceCount = @{} }
+            if (-not $details) {
+                $resourceCount = @{}
+                $totalResourceCost = @{}
+            }
+            try {
+                $allResourceCost = Get-AzConsumptionUsageDetail -BillingPeriodName $billingPeriod -ErrorAction Stop -WarningAction Stop
+            }
+            catch {
+                Write-Warning ("Resource cost for subscription ""$($subscription.Name)"" and billing period ""$billingPeriod"" resulted in an error.`n" + `                              "The error was ""$($_.Exception.Message)"".")
+                $allResourceCost = $null
+            }
             $Resource_Result += $(
                 foreach ($Resource in $Resources) {
                     $countRes++
                     Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countRes * 100 / $Resources.count) -Status "analyzing $($Resources.Count) Resources" -Activity 'analyzing Resources'
-                        if ($details) {
-                            # we want to see every resource
-                            $item = [PSCustomObject] @{
-                                    Subscription      = $($subscription.Name)
-                                    Type              = $Resource.ResourceType
-                                    ResourceName      = $Resource.Name
-                                    ResourceGroupName = $Resource.ResourceGroupName
-                            }
-                        } else {
-                            # we want to see just the count of resources by type
-                            $resourceType = $Resource.ResourceType
-                            $resourceCount[$resourceType]++
-                            # test whether this resource type was already seen
+                    # get resource cost for previous month
+                    if ($allResourceCost -ne $null) {
+                        $resourceCost = $($allResourceCost | Where-Object -Property InstanceId -EQ $Resource.ResourceId | Measure-Object -Property PretaxCost -Sum).Sum
+                    } else {
+                        $resourceCost = $null
+                    }
+                    if ($details) {
+                        # we want to see every resource
+                        if ($resourceCost -eq $null -or $resourceCost -eq 0) { $resourceCost = 'n/a' }
+                        $item = [PSCustomObject] @{
+                                Subscription      = $($subscription.Name)
+                                Type              = $Resource.ResourceType
+                                ResourceName      = $Resource.Name
+                                ResourceGroupName = $Resource.ResourceGroupName
+                                Cost              = $resourceCost
                         }
-                        if ($details) {
-                            # output one item per resource
-                            $item
+                    } else {
+                        # we want to see just the count of resources by type
+                        $resourceType = $Resource.ResourceType
+                        $resourceCount[$resourceType]++
+                        if ($resourceCost -ne $null) {
+                            $totalResourceCost[$resourceType] += $resourceCost
                         }
+                    }
+                    if ($details) {
+                        # output one item per resource
+                        $item
+                    }
                 } # foreach Resource
                 if (-not $details) {
                     # output one item per resource type
                     foreach ($resourceType in $resourceCount.Keys) {
+                        if ($totalResourceCost[$resourceType] -eq 0) { $totalResourceCost[$resourceType] = 'n/a' }
                         [PSCustomObject] @{
                             Subscription      = $($subscription.Name)
                             Type              = $resourceType
                             ResourceCount     = $resourceCount[$resourceType]
+                            Cost              = $totalResourceCost[$resourceType]
                         }
                     }
                 }

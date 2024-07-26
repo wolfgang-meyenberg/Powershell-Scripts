@@ -136,31 +136,41 @@ Get-VirtualNetworks -subscriptionFilter <filterexpression> [-outFile <outfilenam
 Get-AzureResourceData
 =====================
 Purpose:
+    Returns a list of resources of selected type(s) in selected subscription(s)
+    along with some properties and metrics
 
 Usage:
-    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details]] [-outFile <filename> [-separator]]
-    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  [-ResourceList [-details]] [-outFile <filename> [-separator]]
+Get-AzureResourceData -subscriptionFilter <filter> [-VMs] [-SqlServer]
+                      [-DbAas] [-Storage]
+                      [-ResourceList [-details] [-billingPeriod]]
+                      [-outFile <filename> [-separator]]
+Get-AzureResourceData -subscriptionFilter <filterexpression> [-all] ...
 
-    Returns a list of resources of selected type(s) in selected subscription(s), along with some properties and metrics
 
-    -subscriptionFilter single filter or comma-separated list of filters.
-                        all subscriptions whose namematches the filter expression will be analysed.
-    -VMs                show VMs and their properties
-    -SqlServer          show SQL server VM properties
-    -DbAas              show Azure SQL (databases aaS)
-    -Storage            show storage accounts
-    -Snapshot           show snapshots
-    -all                all of the above switches
-    -lastHours          collect metrics within the given time period, default is 24 hours
-    -ResourceList       show count of resource types in subscription
-    -details            show list of resources in subscription
-    -outFile            if given, exports result into a CSV file
-                        NOTE: separate files will be created for different resource types.
-                        Two charachers will be added to the file names to make them different.
-    -separator          separator for items in CSV file, default is semicolon
-    -WhatIf             Just display the names of the subscriptions which would be analysed
+    -subscriptionFilter Single filter or comma-separated list of filters.
+                        All subscriptions whose namematches the filter
+                        expression will be analysed.
+    -VMs                Show VMs and their properties
+    -SqlServer          Show SQL server VM properties
+    -DbAas              Show Azure SQL (databases aaS)
+    -Storage            Show storage accounts
+    -Snapshot           Show snapshots
+    -all                Includes all of the above switches
+    -lastHours          Collect metrics within the given time period,
+                        default is 24 hours
+    -ResourceList       Show count of resource types in subscription
+    -details            Show list of resources in subscription
+    -outFile            Export result to a CSV file rather than on the console
+                        NOTE: separate files will be created for
+                        different resource types.
+                        Two characters will be added to the file names to make
+                        them different.
+    -separator          Separator for items in CSV file, default is semicolon
+    -WhatIf             Just display the names of the subscriptions which
+                        would be analysed
 
-    NOTE: you may adjust this script e.g. to add or remove metrics. These parts of the code
-          are marked with # >>>>> and # <<<<<. refer to the comments for further information.
+    NOTE: you may adjust this script e.g. to add or remove metrics. These parts
+          of the code are marked with # >>>>> and # <<<<<.
+          Refer to the comments in the code for further information.
 
 -------------------------------------------------------------------------------
