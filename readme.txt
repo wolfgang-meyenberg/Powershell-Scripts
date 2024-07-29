@@ -8,17 +8,24 @@ Get-AzurePrice -VMType <vmtype> [-Reservation <reservation>] [-AHB] [-Currency <
 Get-AzurePrice -DiskType <disktype> [-Redundancy <redundancy>] [-Currency <currency>]
 
 Get-AzurePrice -VMType [...] displays estimated monthly fee for a given VM type
--VMType		must be written exactly as in the price table, including proper capitalization.
-			The space may be replaced by an underscore,
-			e.g. use "D4s v4" or "D4s_v5"
--Reservation	is 0, 1, or 3 (years). If omitted, all three values will be reported, separated by semicolons
--Currency		can be any valid three-letter currency code, default value is EUR
--AHB			gives prices without Windows license (i.e. using Azure Hybrid Benefit)
+    -VMType     must be written exactly as in the price table, including
+                proper capitalization.
+                The space may be replaced by an underscore,
+                e.g. use "D4s v4" or "D4s_v5"
+-Reservation    is 0, 1, or 3 (years). If omitted, all three values will be
+                reported, separated by semicolons
+-Currency       can be any valid three-letter currency code,
+                default value is EUR
+-AHB            gives prices without Windows license
+                (i.e. using Azure Hybrid Benefit)
 
-Get-AzurePrice -DiskType [...] displays estimated monthly fee for a given disk type
--Disktype		must be written exactly as in the price table, including proper capitalization, e.g. "E10" or "S20"
--Redundancy	is either LRS or ZRS, default is LRS
--Currency		can be any valid three-letter currency code, default value is EUR
+Get-AzurePrice -DiskType [...] displays estimated monthly fee for a
+                given disk type
+-Disktype       must be written exactly as in the price table, including proper
+                capitalization, e.g. "E10" or "S20"
+-Redundancy     is either LRS or ZRS, default is LRS
+-Currency       can be any valid three-letter currency code,
+                default value is EUR
 
 -------------------------------------------------------------------------------
 
@@ -28,11 +35,12 @@ Purpose:
 List network interfaces in given subscriptions with IP address, VNet name, network address and DNS record, also tests whether NIC is responding to pings
 
 Usage:
-Get-ConnectedNICs [-subscriptionFilter <filterexpression>] [-outFile <outfilename>] [-noPing]
+Get-ConnectedNICs [-subscriptionFilter <filterexpression>]
+                  [-outFile <outfilename>] [-noPing]
 
--subscriptionFilter	mandatory parameter, list NICs in subscriptions matching the filter
--outFile	writes results to a semicolon-separated CSV file if this parameter is given
--noPing	skips testing whether the NIC is responding to a ping
+-subscriptionFilter   mandatory parameter, list NICs in subscriptions matching the filter
+-outFile              writes results to a semicolon-separated CSV file if this parameter is given
+-noPing               skips testing whether the NIC is responding to a ping
 
 -------------------------------------------------------------------------------
 
@@ -60,16 +68,19 @@ Purpose:
 provides count and size statistics about file extensions and ages on file storages
 
 Usage:
-Get-FileAccesses  serverName <servername> [-shareName <sharename>] [-onAccess] [-noAges] [-noExtensions] [-priority (BelowNormal | Normal | AboveNormal | High | Realtime)]
+Get-FileAccesses    serverName <servername> [-shareName <sharename>] [-onAccess]
+                    [-noAges] [-noExtensions] [-priority priority]
 
 -serverName     Mandatory, evaluates data on given share(s) of <servername>
--shareName	     Analyzes files on the given share.
+-shareName      Analyzes files on the given share.
                 If omitted, analyzes data on all non-hidden shares of the given server.
--onAccess	     Uses lastAccess for age calculation.
+-onAccess       Uses lastAccess for age calculation.
                 If omitted, uses lastWrite for age calculation
--noAges	     Ignores file age, lists by extensions only (if  noExtensions is not given)
+-noAges         Ignores file age, lists by extensions only (if  noExtensions
+                is not given)
 -noExtensions   Ignores extensions, lists by age only (if  noAge is not given)
-                If BOTH  no... switches are given, script only returns total file count and size
+                If BOTH  no... switches are given, script only returns total
+                file count and size
 -priority       Starts process with given priority. Use with care.
                 Possible values are BelowNormal | Normal | AboveNormal | High | Realtime
 
@@ -89,12 +100,14 @@ Lists the NSG rules in the given subscriptions in a summarized or detailed way
 
 Usage:
 Get-NSGRules -subscriptionFilter <filterexpression> [-details | -briefDetails] 
--subscriptionfilter	mandatory parameter, list NSGs in subscriptions matching the filter
--details			list all rules in order of their priority
--briefDetails		list every rule, but fewer details
-				if neither "details" switch is present, then all open ports are listed,
-				regardless of the actual source and target networks. Since this mixes rules,
-				it gives you an overview of ports but no reliable information about security
+-subscriptionfilter mandatory parameter, list NSGs in subscriptions matching
+                    the filter
+-details            list all rules in order of their priority
+-briefDetails       list every rule, but fewer details
+                    if neither "details" switch is present, then all open ports
+                    are listed, regardless of the actual source and target
+                    networks. Since this mixes rules, it gives you an over-
+                    view of ports but no reliable information about security
 
 -------------------------------------------------------------------------------
 
@@ -104,18 +117,22 @@ Purpose:
 Lists the VMs, their SKU and their disks
 
 Usage:
-Get VirtualMachineInfos -subscriptionFilter <filterexpression> [-disks [-asString | -aggregatedString] [-ipAddresses] [-ping] [-outFile <filename> [-separator <separator>]]
-Get VirtualMachineInfos  subscriptionFilter <filterexpression>  all [-asString | -aggregatedString] [-outFile <filename> [-separator <separator>]]
+Get VirtualMachineInfos -subscriptionFilter <filterexpression>
+                        [-disks [-asString | -aggregatedString]] [-ipAddresses]
+                        [-ping] [-outFile <filename> [-separator <separator>]]
+Get VirtualMachineInfos -subscriptionFilter <filterexpression> -all
+                        [-asString | -aggregatedString]]
+                        [-outFile <filename> [-separator <separator>]]
 
 Returns a list of all subscriptions, virtual machines, their SKU, IP addresses, and SKUs of attached disks in subscriptions matching the filter
- all	includes  disks,  ipAddresses,  ping
- disks	show OS and data disk SKUs
- asString          shows the disks in string format
- aggregatedString  shows the disks in an aggregated string format
- ipAddresses	show IP address(es)
- ping	ping VM to see whether it is live
- outFile	if given, exports result into a CSV file
- separator	separator for items in CSV file, default is semicolon
+ -all               includes  disks,  ipAddresses,  ping
+ -disks             show OS and data disk SKUs
+ -asString          shows the disks in string format
+ -aggregatedString  shows the disks in an aggregated string format
+ -ipAddresses       show IP address(es)
+ -ping              ping VM to see whether it is live
+ -outFile           if given, exports result into a CSV file
+ -separator         separator for items in CSV file, default is semicolon
 
 -------------------------------------------------------------------------------
 
@@ -125,11 +142,13 @@ Purpose:
 Lists all virtual networks, subnets, IP addresses and -ranges for the specified subscription(s)
 
 Usage:
-Get-VirtualNetworks -subscriptionFilter <filterexpression> [-outFile <outfilename>] [-excludeSubnets]
+Get-VirtualNetworks -subscriptionFilter <filterexpression>
+                    [-outFile <outfilename>] [-excludeSubnets]
 
--subscriptionFilter	mandatory. Lists networks in subscriptions matching the filter
--outFile			writes output into semicolon-separated CSV file
--excludeSubnets		will only list VNets, not subnets
+-subscriptionFilter mandatory. Lists networks in subscriptions
+                    matching the filter
+-outFile            writes output into semicolon-separated CSV file
+-excludeSubnets     will only list VNets, not subnets
 
 -------------------------------------------------------------------------------
 
@@ -141,8 +160,8 @@ Purpose:
 
 Usage:
 Get-AzureResourceData -subscriptionFilter <filter> [-VMs] [-SqlServer]
-                      [-DbAas] [-Storage]
-                      [-ResourceList [-details] [-billingPeriod]]
+                      [-DbAas] [-Storage] [-ResourceList [-details]
+                      [-lastHours <hours>] [-billingPeriod]]
                       [-outFile <filename> [-separator]]
 Get-AzureResourceData -subscriptionFilter <filterexpression> [-all] ...
 
