@@ -38,7 +38,7 @@ if ($help) {
     "    Get-AzureResourceData"
     ""
     "SYNTAX"
-    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details] [-billingPeriod]] [-outFile <filename> [-separator]]"
+    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details] [-billingPeriod <billingperiod>]] [-outFile <filename> [-separator]]"
     "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  ..."
     ""
     "    Returns a list of resources of selected type(s) in selected subscription(s), along with some properties and metrics"
@@ -92,8 +92,8 @@ class scale {
 #    $metric        The metric to be collected. If the metric collection fails,
 #                   a warning will be issued and the metric values will be 'n/a'
 #    $propertyName  The base name of the property to be added.
-#                   As For each metric, max and average values will be added, *two* properties
-#                   will be added with names Max<propertyName> and Avg<propertyName>
+#                   As for each metric, max and average values will be added, *two* properties
+#                   will be added having the names Max<propertyName> and Avg<propertyName>
 #    $scale         Optional. Scale factor for metric, reported value will be divided by <scale>,
 #                   which e.g. makes sense for memory reported in bytes to be output as GB.
 #                   Default is 1
@@ -110,7 +110,7 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
     $startTime=$endTime.AddHours(-$lastHours)
     try {
         $data = $(Get-AzMetric -ResourceId $resourceId -StartTime $startTime -EndTime $endTime -TimeGrain $timeGrain -WarningAction SilentlyContinue -ErrorAction Stop -AggregationType Maximum -MetricName $metric).Data 2>$null
-        if ($data -eq $null -or $data.Count -eq 0) {
+        if ($null -eq $data -or $data.Count -eq 0) {
             # metric calls may fail because metric doesn't exist for this resource, insufficent credentials, and other reasons
             throw "metric exists but returned no data"
         }
@@ -122,7 +122,7 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
         if ($maxThreshold -ne 0) {
             # determine percentage of events (=minutes) where the max load 
             # was larger than <maxThreshold> within given time period
-            $overThreshold = [math]::Truncate(100 * $($data | Where-Object -Property Maximum -GE ($maxThreshold * $max / 100) | select -Property Maximum).Count / $data.Count)
+            $overThreshold = [math]::Truncate(100 * $($data | Where-Object -Property Maximum -GE ($maxThreshold * $max / 100) | Select-Object -Property Maximum).Count / $data.Count)
             $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value $overThreshold
         }
         # average
@@ -136,9 +136,10 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
         }
     }
     catch {
-        Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `                        " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
+        Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `
+                        " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
                         "The error was ""$($_.Exception.InnerException.Body.Message)""." )
-            # add dummy values. some queries may fail only for some resources, in that case, still all objects should have the same fields
+            # add dummy values. some queries may fail only for some resources, in that case, still all objects should have the same properties
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
         if ($maxThreshold -ne 0) {
             $psObject.Value | Add-Member -MemberType NoteProperty -Name "MaxPct$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
@@ -153,7 +154,11 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
 #############
 # display progress information while collecting metrics
 function DisplayMetricProgress ([Int64] $item, [Int64] $total) {
-    Write-Progress -Id 3 -ParentId 2 -PercentComplete $(100*$item/$total) -Status "analyzing metric $item of $total" -Activity 'analyzing metrics'
+    if ($item -gt 0) {
+        Write-Progress -Id 3 -ParentId 2 -PercentComplete $(100*$item/$total) -Status "analyzing metric $item of $total" -Activity 'analyzing metrics'
+    } else {
+        Write-Progress -Id 3 -ParentId 2 -Activity 'analyzing metrics' -Completed
+    }
 }
 
 
@@ -207,7 +212,7 @@ catch {
         throw $PSItem.Exception
     }
 }
-if ($subscriptions -eq $null) {
+if ($null -eq $subscriptions) {
     "no subscriptions matching this filter found."
     exit
 }
@@ -254,7 +259,7 @@ foreach ($subscription in $subscriptions) {
                 $countVM++
                 Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMResources.count) -Status "analyzing VM $countVM of $($VMResources.count) ($($VM.Name))" -Activity 'analyzing VMs'
                 # make SKU names a little shorter, so delete the 'Standard_' part from the SKU
-                $VmSku = ($VM | select -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
+                $VmSku = ($VM | Select-Object -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
                 # we also want CPU count and RAM size
                 $VmSize = Get-AzVMSize -VMName $VM.Name -ResourceGroupName $VM.ResourceGroupName | Where-Object -p Name -EQ $VM.HardwareProfile.VmSize
                 # collect info about data disks
@@ -282,26 +287,31 @@ foreach ($subscription in $subscriptions) {
 # >>>>> Collecting metrics takes some time, so you may use the DisplayMetricProgress function
 # >>>>> This is however fuilly optional, you can also delete all calls to DisplayMetricProgress
                 DisplayMetricProgress 1 5
+
 # >>>>> To add a metric to a resource, call the AddMetrics function.
 # >>>>> See there  for a detailed description of the parameters.
 # >>>>> The next line collects the 'Percentage CPU' metric and adds the MaxCPU and AvgCPU properties to the $item object
-# >>>>> the 1 is the scale factor, and the 80 indcates that we also want a property named MaxPctCPU that shows how many
+# >>>>> the scale factor is one, and the '80' indcates that we also want a property (named MaxPctCPU) that shows how many
 # >>>>> minutes of the day the CPU load was higher than 80% of the day's maximal load
-                AddMetrics ([ref]$item) $VM.Id 'Percentage CPU' 'CPU' 1 80
-                DisplayMetricProgress 2 5
+                AddMetrics ([ref]$item) $VM.Id 'Percentage CPU' 'CPU' ([scale]::unit) 80
+
 # >>>>> Here, we collect the 'Available Memory Bytes' and add the MaxMemMB and AvgMemMB properties, scaled as MiBytes,
+                DisplayMetricProgress 2 5
                 AddMetrics ([ref]$item) $VM.Id 'Available Memory Bytes' 'MemMB' ([scale]::mega)
+
                 DisplayMetricProgress 3 5
-                AddMetrics ([ref]$item) $VM.Id 'Data Disk Queue Depth' 'DiskQ' 1
+                AddMetrics ([ref]$item) $VM.Id 'Data Disk Queue Depth' 'DiskQ' ([scale]::unit)
                 DisplayMetricProgress 4 5
                 AddMetrics ([ref]$item) $VM.Id 'Network In Total' 'NwInMB' ([scale]::mega)
                 DisplayMetricProgress 5 5
                 AddMetrics ([ref]$item) $VM.Id 'Network Out Total' 'NwOutMB' ([scale]::mega)
 # <<<<<
-                # now output the created object with its properties
-                # as we are inside a $..._result += $(...) block, the result will be added to tge $..._result
+                # now return the created object with its properties
+                # as we are inside a $( statements... ) block, the returned object will be caught by the
+                # $result += $(...) statement and be added to the $result array
                 $item
-                Write-Progress -Id 3 -ParentId 2 -Activity 'analyzing metrics' -Completed
+
+                DisplayMetricProgress 0 5
             } # foreach VM
         )
     } # if VMs
@@ -364,6 +374,22 @@ foreach ($subscription in $subscriptions) {
             $countSA = 0
             $Storage_Result += $(
                 foreach ($StorageAccount in $StorageAccounts) {
+<#
+                    $shares = Get-AzRmStorageShare -ResourceGroupName $StorageAccount.ResourceGroupName -StorageAccountName $StorageAccount.StorageAccountName -GetShareUsage
+                    foreach ($share in $shares) {
+                        $usageBytes = $(Get-AzRmStorageShare -ResourceGroupName $StorageAccount.ResourceGroupName -StorageAccountName $StorageAccount.StorageAccountName -ShareName $Share.Name -GetShareUsage).ShareUsageBytes
+                        $item = [PSCustomObject] @{
+                            Subscription = $($subscription.Name)
+                            Name        = $StorageAccount.StorageAccountName
+                            ShareName   = $share.Name
+                            Tier         = $share.AccessTier
+                            UsageBytes   = $usageBytes
+    #                        Kind        = $StorageAccount.Kind
+    #                        Public      = $StorageAccount.AllowBlobPublicAccess
+                        }
+                    }
+
+#>
                     $countSA++
                     Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSA / $StorageAccounts.Count) -Status "analyzing $($countSA) of $($StorageAccounts.Count) Storage Accounts" -Activity 'analyzing Storage Accounts'
                     $item = [PSCustomObject] @{
@@ -374,6 +400,14 @@ foreach ($subscription in $subscriptions) {
                             Kind        = $StorageAccount.Kind
                             Public      = $StorageAccount.AllowBlobPublicAccess
                         }
+
+                        $ThisResourceConsumption = Get-AzConsumptionUsageDetail -BillingPeriod $billingPeriod -InstanceId $StorageAccount.Id
+                        $ThisResourceConsumption | Group-Object -Property Product | ForEach-Object {
+                            $Cost = $_.Group | Measure-Object -property PretaxCost -Sum
+#                            $item | Add-Member -NotePropertyName $_.Name -NotePropertyValue ([math]::Round($Cost.Sum,2))
+
+                        }
+                        <#                        
                     DisplayMetricProgress 1 4
                     AddMetrics ([ref]$item) $StorageAccount.Id 'Egress' 'Egress'
                     DisplayMetricProgress 2 4
@@ -382,6 +416,7 @@ foreach ($subscription in $subscriptions) {
                     AddMetrics ([ref]$item) $StorageAccount.Id 'Transactions' 'Transact' ([scale]::unit) 0 $true
                     DisplayMetricProgress 4 4
                     AddMetrics ([ref]$item) $StorageAccount.Id 'UsedCapacity' 'Usage' ([scale]::unit) 0 $false '01:00:00'
+#>
                     $item
                 } # foreach storage account
             )
@@ -423,7 +458,8 @@ foreach ($subscription in $subscriptions) {
                 $allResourceCost = Get-AzConsumptionUsageDetail -BillingPeriodName $billingPeriod -ErrorAction Stop -WarningAction Stop
             }
             catch {
-                Write-Warning ("Resource cost for subscription ""$($subscription.Name)"" and billing period ""$billingPeriod"" resulted in an error.`n" + `                              "The error was ""$($_.Exception.Message)"".")
+                Write-Warning ("Resource cost for subscription ""$($subscription.Name)"" and billing period ""$billingPeriod"" resulted in an error.`n" + `
+                              "The error was ""$($_.Exception.Message)"".")
                 $allResourceCost = $null
             }
             $Resource_Result += $(
@@ -527,6 +563,8 @@ if (-not $outFile) {
         $Snapshot_Result | Export-Csv -Path $($outFile -replace '\.', '_SS.') -Delimiter $separator -NoTypeInformation
     }
     if ($ResourceList -and $Resource_Result) {
-        $Resource_Result | `            Sort-Object -Property @{Expression="Subscription";Descending=$false},@{Expression="ResourceCount";Descending=$true} | `            Export-Csv -Path $($outFile -replace '\.', '_RL.') -Delimiter $separator -NoTypeInformation
+        $Resource_Result | `
+            Sort-Object -Property @{Expression="Subscription";Descending=$false},@{Expression="ResourceCount";Descending=$true} | `
+            Export-Csv -Path $($outFile -replace '\.', '_RL.') -Delimiter $separator -NoTypeInformation
     }
 }

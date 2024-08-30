@@ -1,7 +1,7 @@
 ﻿[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
-    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $computerFilter,
+    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $Filter,
     [Parameter(ParameterSetName="default", Position=1)] [switch] $details,
     [Parameter(ParameterSetName="default", Position=2)] [switch] $ping,
     [Parameter(ParameterSetName="default", Position=3)] [string] $outFile,
@@ -16,7 +16,7 @@ if ($help) {
     "    name of computer, printer, driver, and printer IP address."
     ""
     "Usage:"
-    "    Get-PrinterQueues -computerFilter <filter> [-details] [-ping] [-outFile <outfilename>]"
+    "    Get-PrinterQueues -Filter <filter> [-details] [-ping] [-outFile <outfilename>]"
     "    -computerFilter"
     "        name(s) of computer(s) whose queues shall be displayed. Filter may contain wildcards"
     ""

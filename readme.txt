@@ -1,3 +1,55 @@
+Get-ResourceCostDetails
+=======================
+Purpose:
+Collect usage and cost data for resources of given resource type in Azure in given subscriptions.
+Resources which do not generate any cost or are usually not of interest as their cost does not depend on usage (e.g. VM disks) are skipped, but can be included if they are listed in the resource types.
+Data is usually output as PSCustomObjects, but can also be output to a (set of) CSV files.
+
+Usage:
+Get-ResourceCostDetails  subscriptionFilter <subscription>[,<subscription>]
+    [-resourceTypes <type>[,<type>]] [-excludeTypes <type>[,<type>]]
+    [-billingPeriod <billingperiod>] [-noUnits] [-showZeroCostItems]
+    [-outFile <filename> [-delimiter <character>]] [-WhatIf]
+Get-ResourceCostDetails [-help]
+
+Parameters:
+-subscriptionFilter  Mandatory. Single filter or comma-separated list of
+                     filters. All subscriptions whose name contain the filter
+                     expression will be analysed.
+-resourceTypes       Single filter or comma-separated list of filters. Only
+                     resources with matching types will be analysed. If ‘*’ is
+                     given as filter, all resource types will be evaluated,
+                     except those which are excluded by default and except
+                     those listed with the excludeTypes.
+-excludeTypes        Single resource type or comma-separated list of types,
+                     evaluation of these types will be skipped. Some types will
+                     be excluded by default unless specified in the
+                     resourceTypes parameter.
+-billingPeriod       Collect cost for given billing period, format is
+                     'yyyyMMdd',default is the last month.
+-noUnits             Usually the first object returned is a list of units &
+                     scales, as the metrics come in 1s, 10000s, or so. This
+                     switch will omit the units object, so that only the actual
+                     metrics are output. This is useful if one single resource
+                     type is evaluated and the output is piped into another
+                     function.
+12345678901234567890123456789012345678901234567890123456789012345678901234567890
+-showZeroCostItems   Display cost items that are zero. Normally, these items are
+                     omitted from the output.
+-outFile             Write output to a set of CSV files. Without this switch,
+                     results are written to standard output as objects. Since
+                     the results have a different format for each resource type,
+                     results are not written to a single CSV file, but to
+                     separate files, one for each resource type. For each file,
+                     the resource type will be inserted into the name before the
+                     final dot.
+-delimiter           Separator character for the CSV file. Default is the list
+                     separator for the current culture.
+-WhatIf              Don't evaluate costs but show a list of resources and
+                     resource types which would be evaluated. 
+
+-------------------------------------------------------------------------------
+
 Get-AzurePrice
 ==============
 Purpose:
@@ -35,10 +87,10 @@ Purpose:
 List network interfaces in given subscriptions with IP address, VNet name, network address and DNS record, also tests whether NIC is responding to pings
 
 Usage:
-Get-ConnectedNICs [-subscriptionFilter <filterexpression>]
+Get-ConnectedNICs [-subscriptionFilter <filter>[,<filter>]]
                   [-outFile <outfilename>] [-noPing]
 
--subscriptionFilter   mandatory parameter, list NICs in subscriptions matching the filter
+-subscriptionFilter   mandatory parameter, list NICs in subscriptions matching the filter(s)
 -outFile              writes results to a semicolon-separated CSV file if this parameter is given
 -noPing               skips testing whether the NIC is responding to a ping
 
@@ -48,13 +100,13 @@ Get-PrinterQueues
 =================
 Purpose:
 Lists all printer queues on all computers matching the filter.
-The <filter> can be a computer name but also include wildcards
 The output will be for the each printer on the matching computer(s),
 name of computer, printer, driver, and printer IP address.
 
 Usage:
 Get-PrinterQueues -filter <filter> [-details] [-ping] [-outFile <outfilename>]
 
+-filter   The <filter> can be a computer name, it can include wildcards.
 -details  Give additional details for each printer: name of shared printer,
           location, comment, and port name
 -ping     will try to ping each printer and output an additional field 'IsLive'
@@ -99,7 +151,7 @@ Purpose:
 Lists the NSG rules in the given subscriptions in a summarized or detailed way
 
 Usage:
-Get-NSGRules -subscriptionFilter <filterexpression> [-details | -briefDetails] 
+Get-NSGRules -subscriptionFilter <filter>[,<filter>] [-details | -briefDetails] 
 -subscriptionfilter mandatory parameter, list NSGs in subscriptions matching
                     the filter
 -details            list all rules in order of their priority
@@ -117,7 +169,7 @@ Purpose:
 Lists the VMs, their SKU and their disks
 
 Usage:
-Get VirtualMachineInfos -subscriptionFilter <filterexpression>
+Get VirtualMachineInfos -subscriptionFilter <filter>[,<filter>]
                         [-disks [-asString | -aggregatedString]] [-ipAddresses]
                         [-ping] [-outFile <filename> [-separator <separator>]]
 Get VirtualMachineInfos -subscriptionFilter <filterexpression> -all
@@ -125,14 +177,14 @@ Get VirtualMachineInfos -subscriptionFilter <filterexpression> -all
                         [-outFile <filename> [-separator <separator>]]
 
 Returns a list of all subscriptions, virtual machines, their SKU, IP addresses, and SKUs of attached disks in subscriptions matching the filter
- -all               includes  disks,  ipAddresses,  ping
- -disks             show OS and data disk SKUs
- -asString          shows the disks in string format
- -aggregatedString  shows the disks in an aggregated string format
- -ipAddresses       show IP address(es)
- -ping              ping VM to see whether it is live
- -outFile           if given, exports result into a CSV file
- -separator         separator for items in CSV file, default is semicolon
+-all               includes  disks,  ipAddresses,  ping
+-disks             show OS and data disk SKUs
+-asString          shows the disks in string format
+-aggregatedString  shows the disks in an aggregated string format
+-ipAddresses       show IP address(es)
+-ping              ping VM to see whether it is live
+-outFile           if given, exports result into a CSV file
+-separator         separator for items in CSV file, default is semicolon
 
 -------------------------------------------------------------------------------
 
@@ -142,7 +194,7 @@ Purpose:
 Lists all virtual networks, subnets, IP addresses and -ranges for the specified subscription(s)
 
 Usage:
-Get-VirtualNetworks -subscriptionFilter <filterexpression>
+Get-VirtualNetworks -subscriptionFilter <filter>[,<filter>]
                     [-outFile <outfilename>] [-excludeSubnets]
 
 -subscriptionFilter mandatory. Lists networks in subscriptions
@@ -159,37 +211,52 @@ Purpose:
     along with some properties and metrics
 
 Usage:
-Get-AzureResourceData -subscriptionFilter <filter> [-VMs] [-SqlServer]
+Get-AzureResourceData -subscriptionFilter <filter>[,<filter>] [-VMs] [-SqlServer]
                       [-DbAas] [-Storage] [-ResourceList [-details]
-                      [-lastHours <hours>] [-billingPeriod]]
+                      [-lastHours <hours>] [-billingPeriod <billingperiod>]]
                       [-outFile <filename> [-separator]]
 Get-AzureResourceData -subscriptionFilter <filterexpression> [-all] ...
 
 
-    -subscriptionFilter Single filter or comma-separated list of filters.
-                        All subscriptions whose namematches the filter
-                        expression will be analysed.
-    -VMs                Show VMs and their properties
-    -SqlServer          Show SQL server VM properties
-    -DbAas              Show Azure SQL (databases aaS)
-    -Storage            Show storage accounts
-    -Snapshot           Show snapshots
-    -all                Includes all of the above switches
-    -lastHours          Collect metrics within the given time period,
-                        default is 24 hours
-    -ResourceList       Show count of resource types in subscription
-    -details            Show list of resources in subscription
-    -outFile            Export result to a CSV file rather than on the console
-                        NOTE: separate files will be created for
-                        different resource types.
-                        Two characters will be added to the file names to make
-                        them different.
-    -separator          Separator for items in CSV file, default is semicolon
-    -WhatIf             Just display the names of the subscriptions which
-                        would be analysed
+-subscriptionFilter Single filter or comma-separated list of filters.
+                    All subscriptions whose name matches the filter
+                    expression will be analysed.
+-VMs                Show VMs and their properties
+-SqlServer          Show SQL server VM properties
+-DbAas              Show Azure SQL (databases aaS)
+-Storage            Show storage accounts
+-Snapshot           Show snapshots
+-all                Includes all of the above switches
+-lastHours          Collect metrics within the given time period,
+                    default is 24 hours
+-ResourceList       Show count of resource types in subscription
+-details            Show list of resources in subscription
+-outFile            Export result to a CSV file rather than on the console
+                    NOTE: separate files will be created for
+                    different resource types.
+                    Two characters will be added to the file names to make
+                    them different.
+-separator          Separator for items in CSV file, default is semicolon
+-WhatIf             Just display the names of the subscriptions which
+                    would be analysed
 
-    NOTE: you may adjust this script e.g. to add or remove metrics. These parts
-          of the code are marked with # >>>>> and # <<<<<.
-          Refer to the comments in the code for further information.
+NOTE: you may adjust this script e.g. to add or remove metrics. These parts
+      of the code are marked with # >>>>> and # <<<<<.
+      Refer to the comments in the code for further information.
 
 -------------------------------------------------------------------------------
+
+Get-StorageAccountCostDetails
+=============================
+Purpose:
+Get all cost and usage metrics from the billing details for storage accounts in selected subscription(s). Metrics which are zero for all accounts will be omitted from output. Field names will reflect the name of the billing metric and the units (e.g. 1/hour or 10K).
+
+Usage:
+Get-StorageAccountCostDetails -subscriptionFilter <filter>[,<filter>]
+                              [-billingPeriod <billingperiod>]
+
+-subscriptionFilter   single filter or comma-separated list of filters. All
+                      subscriptions whose name contain the filter expression
+                      will be analysed.
+-billingPeriod        collect cost for given billing period,
+                      format is 'yyyyMMdd', default is the last month
