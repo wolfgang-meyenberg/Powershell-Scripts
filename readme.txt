@@ -24,29 +24,36 @@ Parameters:
 -excludeTypes        Single resource type or comma-separated list of types,
                      evaluation of these types will be skipped. Some types will
                      be excluded by default unless specified in the
-                     resourceTypes parameter.
+                     resourceTypes parameter. See also below.
 -billingPeriod       Collect cost for given billing period, format is
                      'yyyyMMdd',default is the last month.
+-showUsage           Display usage information for each cost item additionally
+                     to the cost.
+-showZeroCostItems   Display cost items that are zero. Normally, these items are
+                     omitted from the output.
 -noUnits             Usually the first object returned is a list of units &
                      scales, as the metrics come in 1s, 10000s, or so. This
                      switch will omit the units object, so that only the actual
                      metrics are output. This is useful if one single resource
                      type is evaluated and the output is piped into another
                      function.
-12345678901234567890123456789012345678901234567890123456789012345678901234567890
--showZeroCostItems   Display cost items that are zero. Normally, these items are
-                     omitted from the output.
--outFile             Write output to a set of CSV files. Without this switch,
-                     results are written to standard output as objects. Since
-                     the results have a different format for each resource type,
-                     results are not written to a single CSV file, but to
+-outFile             Write output to a set of CSV files. Without this parameter,
+                     results are written to standard output as objects, so
+                     piping them e.g. to Export-Csv will not give correct
+                     results, so use this parameter instead.
+                     Since the results have a different format for each resource
+                     type, results are not written to a single CSV file, but to
                      separate files, one for each resource type. For each file,
-                     the resource type will be inserted into the name before the
-                     final dot.
+                     the resource type will be inserted into the name before
+                     the final dot.
 -delimiter           Separator character for the CSV file. Default is the list
                      separator for the current culture.
 -WhatIf              Don't evaluate costs but show a list of resources and
-                     resource types which would be evaluated. 
+                     resource types which would be evaluated.
+Some resource types are excluded by default, they will be displayed if you use
+the  help switch. To include these types, list them with the -resourceTypes
+parameter explicitly
+
 
 -------------------------------------------------------------------------------
 
