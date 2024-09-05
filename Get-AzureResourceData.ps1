@@ -374,22 +374,6 @@ foreach ($subscription in $subscriptions) {
             $countSA = 0
             $Storage_Result += $(
                 foreach ($StorageAccount in $StorageAccounts) {
-<#
-                    $shares = Get-AzRmStorageShare -ResourceGroupName $StorageAccount.ResourceGroupName -StorageAccountName $StorageAccount.StorageAccountName -GetShareUsage
-                    foreach ($share in $shares) {
-                        $usageBytes = $(Get-AzRmStorageShare -ResourceGroupName $StorageAccount.ResourceGroupName -StorageAccountName $StorageAccount.StorageAccountName -ShareName $Share.Name -GetShareUsage).ShareUsageBytes
-                        $item = [PSCustomObject] @{
-                            Subscription = $($subscription.Name)
-                            Name        = $StorageAccount.StorageAccountName
-                            ShareName   = $share.Name
-                            Tier         = $share.AccessTier
-                            UsageBytes   = $usageBytes
-    #                        Kind        = $StorageAccount.Kind
-    #                        Public      = $StorageAccount.AllowBlobPublicAccess
-                        }
-                    }
-
-#>
                     $countSA++
                     Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countSA / $StorageAccounts.Count) -Status "analyzing $($countSA) of $($StorageAccounts.Count) Storage Accounts" -Activity 'analyzing Storage Accounts'
                     $item = [PSCustomObject] @{
@@ -404,19 +388,7 @@ foreach ($subscription in $subscriptions) {
                         $ThisResourceConsumption = Get-AzConsumptionUsageDetail -BillingPeriod $billingPeriod -InstanceId $StorageAccount.Id
                         $ThisResourceConsumption | Group-Object -Property Product | ForEach-Object {
                             $Cost = $_.Group | Measure-Object -property PretaxCost -Sum
-#                            $item | Add-Member -NotePropertyName $_.Name -NotePropertyValue ([math]::Round($Cost.Sum,2))
-
                         }
-                        <#                        
-                    DisplayMetricProgress 1 4
-                    AddMetrics ([ref]$item) $StorageAccount.Id 'Egress' 'Egress'
-                    DisplayMetricProgress 2 4
-                    AddMetrics ([ref]$item) $StorageAccount.Id 'Ingress' 'Ingress'
-                    DisplayMetricProgress 3 4
-                    AddMetrics ([ref]$item) $StorageAccount.Id 'Transactions' 'Transact' ([scale]::unit) 0 $true
-                    DisplayMetricProgress 4 4
-                    AddMetrics ([ref]$item) $StorageAccount.Id 'UsedCapacity' 'Usage' ([scale]::unit) 0 $false '01:00:00'
-#>
                     $item
                 } # foreach storage account
             )

@@ -70,7 +70,7 @@ function Write-ObjectToFile ([PSObject] $object, [string]$filePath, [string]$del
 #
 #
 
-# exclude some resource types by default
+# preload a variable with the resource types which will be excluded by default
 $defaultexcludeTypes = @(
     'activityLogAlerts',
     'applicationSecurityGroups',
@@ -141,7 +141,10 @@ if ($help) {
     exit
 }
 
-### first, let#s so some parameter magic 
+
+#########################################
+# before beginning the processing, do some parameter magic first
+# 
 
 # if user hasn't given a billing period, we assume the previous month
 if ($billingPeriod -eq '') {
@@ -159,7 +162,9 @@ foreach ($filter in $subscriptionFilter) {
         $subscriptionNames[$subscription.Name] = 0
     }
 }
-# next command may fail if we haven't logged on to Azure first
+
+# determine the subscription(s) which match the subscription filter
+#this command will fail if we haven't logged on to Azure first
 try {
     $subscriptions = $(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -in $($subscriptionNames.Keys)}) | Sort-Object -Property Name
 }
@@ -195,14 +200,29 @@ if ($WhatIf) {
    exit
 }
 
+#####################################
+# OK, finally the main processing will begin
+#
+
 $countS = 0 # used for progress bar
 
+# set default for CSV field separator if needed
 if (('' -ne $outFile) -and ($delimiter -eq '')) {
     $delimiter = (Get-Culture).textinfo.ListSeparator
 }
 
-$ResourceCostItems = @{}    # all cost items of all resources with cost and usage numbers
-$nonZeroResources =@()      # all resources that have generated nonzero cost
+# define an array and a hash table which we need later
+$ResourceCostItems = @{}    # a two-dimensional hash table, i.e. a string-indexed hash table with values that are
+                            # string-indexed hash tables with numeric values. Imagine
+                            # <table>[<resourcename>Usage][<costitem>] = <usage> and
+                            # <table>[<resourcename>Cost][<costitem>]  = <cost>
+                            # for each resources and each Cost Item. 
+                            # A Cost Item is any metric of a resource which may generate cost.
+                            # As example, for resource 'mystore' and Cost Item 'read actions', entries could be
+                            # $ResourceCostItems['mystoreUsage']['read actions'] = 120000
+                            # $ResourceCostItems['mystoreCost']['read actions'] = 0.123
+$nonZeroResources = @()     # all resources that have generated nonzero cost. In the sequel, we ignore resources
+                            # which don't generate any cost
 foreach ($subscription in $subscriptions) {
     # initialize collector array
     $Resources = @()            # all resources in current subscription
@@ -211,17 +231,13 @@ foreach ($subscription in $subscriptions) {
     Select-AzSubscription $subscription | Out-Null
     $countS++ # count for 1st level progress bar
     Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "$countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'analysing subscriptions'
-
-    if ($null -eq $resourceTypes) {
-        $Resources = @(Get-AzResource)
-    } else {
-        foreach ($resource in Get-AzResource) {
-            if ( MatchFilter $resource.ResourceType $resourceTypes ($excludeTypes + $defaultexcludeTypes)) {
-                $Resources += $resource
-            }
+    # get all resources matching the filters
+    foreach ($resource in Get-AzResource) {
+        if ( MatchFilter $resource.ResourceType $resourceTypes ($excludeTypes + $defaultexcludeTypes)) {
+            $Resources += $resource
         }
     }
-
+    # get consumption data for all these resources
     if ($Resources.Count -ne 0) {
         $countRes = 0    # count for 2nd level progress bar
         foreach ($Resource in $Resources | Sort-Object -Property ResourceType) {
@@ -351,7 +367,7 @@ foreach ($resourceType in ($nonZeroResources | Group-Object -Property ResourceTy
         if ('' -eq $outFile) {
             $item
         } else {
-            Write-ObjectToFile $item $outFileName $delimiter -force
+            Write-ObjectToFile $item $outFileName $delimiter
         }
     }
     # now let's output the actual data
