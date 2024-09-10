@@ -253,17 +253,3 @@ NOTE: you may adjust this script e.g. to add or remove metrics. These parts
 
 -------------------------------------------------------------------------------
 
-Get-StorageAccountCostDetails
-=============================
-Purpose:
-Get all cost and usage metrics from the billing details for storage accounts in selected subscription(s). Metrics which are zero for all accounts will be omitted from output. Field names will reflect the name of the billing metric and the units (e.g. 1/hour or 10K).
-
-Usage:
-Get-StorageAccountCostDetails -subscriptionFilter <filter>[,<filter>]
-                              [-billingPeriod <billingperiod>]
-
--subscriptionFilter   single filter or comma-separated list of filters. All
-                      subscriptions whose name contain the filter expression
-                      will be analysed.
--billingPeriod        collect cost for given billing period,
-                      format is 'yyyyMMdd', default is the last month
