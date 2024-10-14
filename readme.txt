@@ -1,18 +1,20 @@
 Get-ResourceCostDetails
 =======================
-Purpose:
-Collect usage and cost data for resources of given resource type in Azure in given subscriptions.
-Resources which do not generate any cost or are usually not of interest as their cost does not depend on usage (e.g. VM disks) are skipped, but can be included if they are listed in the resource types.
-Data is usually output as PSCustomObjects, but can also be output to a (set of) CSV files.
-
+    
+Synopsis:
+Collect cost and usage information for Azure resources, optionally export them into one or more CSV files
+    
 Usage:
 Get-ResourceCostDetails  subscriptionFilter <subscription>[,<subscription>]
     [-resourceTypes <type>[,<type>]] [-excludeTypes <type>[,<type>]]
     [-billingPeriod <billingperiod>] [-noUnits] [-showZeroCostItems]
     [-outFile <filename> [-delimiter <character>]] [-WhatIf]
-Get-ResourceCostDetails [-help]
+Description:
+Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
+If an output file name is given, a separate CSV file is created for each resource type, because the
 
 Parameters:
+    
 -subscriptionFilter  Mandatory. Single filter or comma-separated list of
                      filters. All subscriptions whose name contain the filter
                      expression will be analysed.
@@ -50,9 +52,10 @@ Parameters:
                      separator for the current culture.
 -WhatIf              Don't evaluate costs but show a list of resources and
                      resource types which would be evaluated.
-Some resource types are excluded by default, they will be displayed if you use
-the  help switch. To include these types, list them with the -resourceTypes
-parameter explicitly
+                     Some resource types are excluded by default, they will
+                     also be displayed if you use the  help switch.
+                     To include these types, list them with the -resourceTypes
+                     parameter explicitly.
 
 
 -------------------------------------------------------------------------------

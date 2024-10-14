@@ -1,17 +1,95 @@
-[CmdletBinding(DefaultParameterSetName = 'default')]
+<#
+.SYNOPSIS
+	collects cost and usage information for Azure resources, optionally exports them into one or more CSV files
 
+.DESCRIPTION
+	Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
+	If an output file name is given, a separate CSV file is created for each resource type, because the 
+.PARAMETER subscriptionFilter
+	Single filter or comma-separated list of filters. All subscriptions whose name contains the filter expression will be analysed.
+    To match all accessible subscriptions, "*" can be specifed.
+
+.PARAMETER resourceTypes
+	Single filter or comma-separated list of filters. Only resources with matching types will be analysed.
+	Only the last part of the type name needs to be given (e.g. "virtualmachines" for "Microsoft.Compute/virtualMachines"). To match all types, parameter can be omitted or "*" can be used.
+	Some resource types which typically don't generate cost are excluded by default, they can be included by explicitly specifying them, i.e. they are not included by "*"
+
+.PARAMETER excludeTypes
+	Comma-separated list of resource types, evaluation of these types will be skipped.
+
+.PARAMETER billingPeriod
+	Collect cost for given billing period, format is "yyyyMMdd", default is the last month.
+
+.PARAMETER noUnits
+	Usually the first object returned is a list of units & scales, as the metrics come in 1s, 10000s,or so.
+    This switch will omit the units object, so that only the actual metrics are output.
+
+.PARAMETER showUsage
+	Display usage information for each cost item additionally to the cost.
+
+.PARAMETER showZeroCostItems
+	Display cost items that are zero. Normally, these items are omitted from the output.
+
+.PARAMETER outFile
+	Write output to a set of CSV files. Without this switch, results are written to standard output as objects.
+    Since the results have a different format for each resource type, results are not written to a single CSV file,
+    but to separate files, one for each resource type.
+    For each file, the resource type will be inserted into the name before the final dot.
+
+.PARAMETER delimiter
+	Separator character for the CSV file. Default is the list separator for the current culture.
+
+.PARAMETER WhatIf
+	Don't evaluate costs but show a list of resources and resource types which would be evaluated. Also show list of resource types which are excluded by default.
+
+.EXAMPLE
+Get-ResourceCostDetails.ps1 -subscriptionFilter mySubs001,mySubs003 -resourceTypes virtualMachines,storageAccounts
+	Analyze virtual machines and storage accounts in the two given subscriptions and write result as objects to standard output
+
+.EXAMPLE
+Get-ResourceCostDetails.ps1 -subscriptionFilter mySubs002 -resourceTypes *,routeTables -excludeTypes privateDnsZones -showUsage
+	Analyze resource of all types(*) in given subscription, except private DNS zones, but include route tables which are otherwise excluded by default.
+    To see which resource types are excluded by default (unless specifically listed in -resourceTypes parameter), call script with -WhatIf parameter.
+
+.EXAMPLE
+Get-ResourceCostDetails.ps1 -subscriptionFilter * -resourceTypes virtualMachines,storageAccounts -billingPeriod 20240501 -outFile result.csv
+	Analyze virtual machines and storage accounts in the all accessible subscriptions and write result to a set of CSV files.
+    For the two resource types, two separate files will be created named "result-virtualMachines.csv" and "result-storageAccounts.csv"
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'default')]
 Param (
-    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string[]] $subscriptionFilter,
-    [Parameter(ParameterSetName="default")] [string[]] $resourceTypes = @('*'),
-    [Parameter(ParameterSetName="default")] [string[]] $excludeTypes = @(), 
-    [Parameter(ParameterSetName="default")] [string] $billingPeriod = '',
-    [Parameter(ParameterSetName="default")] [switch] $showUsage,
-    [Parameter(ParameterSetName="default")] [switch] $showZeroCostItems,
-    [Parameter(ParameterSetName="default")] [switch] $noUnits,
-    [Parameter(ParameterSetName="default")] [string] $outFile,
-    [Parameter(ParameterSetName="default")] [string] $delimiter,
-    [Parameter(ParameterSetName="default")] [switch] $WhatIf,
-    [Parameter(ParameterSetName="help", Mandatory)] [Alias("h")] [switch] $help
+    [Parameter(HelpMessage="one or more partial subsciption names", Mandatory, Position=0)]
+    [SupportsWildcards()]
+    [string[]] $subscriptionFilter,
+
+    [Parameter(HelpMessage="resource types to include, last part of hierarchical name is sufficient (e.g. 'virtualmachines')")]
+    [SupportsWildcards()]
+    [string[]] $resourceTypes = @('*'),
+
+    [Parameter(HelpMessage="resource types to exclude, last part of hierarchical name is sufficient (e.g. 'storageaccounts')")]
+    [SupportsWildcards()]
+    [string[]] $excludeTypes = @(), 
+
+    [Parameter(HelpMessage="billing period in the format DDMMYYYY")]
+    [string] $billingPeriod = '',
+
+    [switch] $showUsage,
+    
+    [switch] $showZeroCostItems,
+
+    [switch] $noUnits,
+
+    [Parameter(ParameterSetName="default", HelpMessage="first part of filename for output CSV file (resource type will be added to filename(s))")]
+    [Parameter(ParameterSetName="outputToFile", HelpMessage="first part of filename for output CSV file (resource type will be added to filename(s))", Mandatory)]
+    [string] $outFile,
+
+    [Parameter(ParameterSetName="outputToFile", HelpMessage="character to be used as delimiter")]
+    [string] [ValidateLength(1,1)] $delimiter,
+
+    [switch] $WhatIf,
+
+    [switch] $help
 )
 
 # necessary modules:
@@ -100,48 +178,6 @@ $defaultexcludeTypes = @(
     'workflows'
 )
 
-#######################
-# display usage help and exit
-#
-if ($help) {
-    "NAME"
-    "Get-ResourceCostDetails"
-    "SYNTAX"
-    "Get-ResourceCostDetails"
-    "-subscriptionFilter Single filter or comma-separated list of filters."
-    "                    All subscriptions whose name contain the filter"
-    "                    expression will be analysed."
-    "-resourceTypes      Single filter or comma-separated list of filters."
-    "                    Only resources with matching types will be analysed."
-    "-excludeTypes       Comma-separated list of resource types, evaluation"
-    "                    of these types will be skipped. See also below."
-    "-billingPeriod      Collect cost for given billing period,"
-    "                    format is 'yyyyMMdd',default is the last month."
-    "-noUnits            Usually the first object returned is a list of"
-    "                    units & scales, as the metrics come in 1s, 10000s,"
-    "                    or so. This switch will omit the units object,"
-    "                    so that only the actual metrics are output."
-    "-showUsage          Display usage information for each cost item."
-    "-showZeroCostItems  Display cost items that are zero. Normally, these"
-    "                    items are omitted from the output."
-    "-outFile            Write output to a set of CSV files. Without this switch,"
-    "                    results are written to standard output as objects. Since"
-    "                    the results have a different format for each resource"
-    "                    type, results are not written to a single CSV file, but"
-    "                    to separate files, one for each resource type. For each"
-    "                    file, the resource type will be inserted into the name"
-    "                    before the final dot."
-    "-delimiter          Separator character for the CSV file. Default is the"
-    "                    list separator for the current culture."
-    "-WhatIf             Don't evaluate costs but show a list of resources and"
-    "                    resource types which would be evaluated."
-    ""
-    "Some resource types are excluded by default. to include them, list them with the -resourceTypes parameter explicitly:" 
-    $defaultexcludeTypes -join ', '
-    exit
-}
-
-
 #########################################
 # before beginning the processing, do some parameter magic first
 # 
@@ -197,6 +233,7 @@ if ($WhatIf) {
             }
         }
     }
+    "types excluded by default: $defaultexcludeTypes"
    exit
 }
 
