@@ -1,4 +1,41 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'default')]
+﻿<#
+.SYNOPSIS
+Lists the VMs, their SKU and their disks in given subscriptions. Results are output as a list of objects, but can also be directly written into a CSV file.
+.DESCRIPTION
+Iterates through all subscriptions matching the filter and shows their SKUs.
+Optionally, disk information can be shown in various formats, and it can be tested whether a VM can be pinged.
+Prerequisite is that user is logged on to Azure with at least reader rights to respective resources.
+If the script does not display any data, use Connect-AzAccount to log on.
+.PARAMETER subscriptionFilter <filterExpression>
+Mandatory parameter. Lists VMs in all subscriptions the names of which contain the expression in any part of their name. Specifying * as filter expression matches all accessible subscriptions.
+.PARAMETER disks
+Show the SKUs of OS and data disks. The data disk SKUs are output as a list in the sequence as they are attached to the VM.
+.PARAMETER asString
+Requires the -disks switch. Data disks are given as a string in the format count x sku {+ count x sku} in the sequence as they are attached to the VM.
+.PARAMETER aggregatedString
+Requires the -disks switch. Data disks are given as a string in the format count x sku {+ count x sku} aggregated and sorted by SKUs 
+.PARAMETER ipAddresses
+Show IP address(es) of the listed VMs.
+.PARAMETER ping
+Shows whether the VMs are live (i.e. whether it can be pinged).
+.PARAMETER all
+Same as specifying all te switches  disks,  ipAddresses,  ping
+.PARAMETER outFile <filePath>
+Writes the output to a file in CSV format. If the -disks switch is given, each disk is given in a separate field.
+.PARAMETER separator	<separator>
+Requires the -outFile parameter. Uses the specified separator for the CSV file, default is the semicolon ;
+.EXAMPLE
+Get VirtualMachineInfo -subscription mySubs -disks
+Lists all VMs in the subscription ‘mySubs’ with their OS and data disks
+.EXAMPLE
+Get VirtualMachineInfo -subscription mySubs -all -asString
+Lists all VMs in the subscription ‘mySubs’ including disks and ping status. Disk list is given as a string rather than as a Powershell list
+.EXAMPLE
+Get VirtualMachineInfo -subscription mySubs -outFile mySubs_VMs.csv -separator :
+Lists all VMs in the subscription ‘mySubs’ and writed them to a colon-separated CSV file
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,
@@ -46,7 +83,7 @@ if ($help) {
 #
 function DiskSkuToSkuName ($tier, $size)
 {
-    if ($tier -eq $null) {
+    if ($null -eq $tier) {
         $SkuName = "X"  # we can't identify the tier
     } elseif ($tier.substring(0,7) -eq "Premium") {
         $SkuName = "P"
@@ -127,7 +164,7 @@ catch {
     }
 }
 
-if ($subscriptions -eq $null) {
+if ($null -eq $subscriptions) {
     "no subscriptions matching this filter found."
     exit
 }
@@ -229,7 +266,7 @@ $result = $(
                 # we want to know the IP addresses on the VMs
                 # a VM might have more than one NIC,
                 # and a NIC might have more than one IP address
-                $nicIds = $VM.NetworkProfile.NetworkInterfaces | select Id
+                $nicIds = $VM.NetworkProfile.NetworkInterfaces | Select-Object Id
                 $nicString = ''
                 foreach ($nicId in $nicIds) {
                     $nic = Get-AzNetworkInterface -ResourceId $nicId.Id
@@ -239,10 +276,11 @@ $result = $(
                     }
                 }
                 $item | Add-Member -MemberType NoteProperty -Name 'IpAddresses' -Value $nicString
-                if ($ping) {
-                    $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue).PingSucceeded
-                    $item | Add-Member -MemberType NoteProperty -Name 'IsLive' -Value $Live
-                }
+            }
+            if ($ping) {
+#                $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue -ProgressAction SilentlyContinue -InformationLevel Quiet)
+                $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue -InformationLevel Quiet)
+                $item | Add-Member -MemberType NoteProperty -Name 'IsLive' -Value $Live
             }
             $item
         }
@@ -269,7 +307,7 @@ if (-not $outFile) {
         foreach ($item in $result) {
             # construct one line per item in the $result array
             $line = ''
-            foreach ($memberName in ($item.psobject.properties | select -ExpandProperty Name)) {
+            foreach ($memberName in ($item.psobject.properties | Select-Object -ExpandProperty Name)) {
                 # iterate through the properties of the $item object
                 $member = $item.$memberName
                 if ($member.GetType().IsArray) {
