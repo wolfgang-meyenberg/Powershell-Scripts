@@ -4,7 +4,10 @@
 
 .DESCRIPTION
 	Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
-	If an output file name is given, a separate CSV file is created for each resource type, because the 
+	If an output file name is given, a separate CSV file is created for each resource type, because the column count and headers are type dependent.
+    NOTE:
+    Some resource types are excluded by default unless being explicitly included using the -resourceTypes parameter.
+    To get a list of default exclusions, call the script with the -WhatIf switch.
 .PARAMETER subscriptionFilter
 	Single filter or comma-separated list of filters. All subscriptions whose name contains the filter expression will be analysed.
     To match all accessible subscriptions, "*" can be specifed.
@@ -111,7 +114,7 @@ Param (
 function MatchFilter ([string] $value, [string[]]$includeFilters, [string[]]$excludeFilters)
 {
     foreach ($inclusion in $includeFilters) {
-        if ( ($inclusion -ne '*') -and ($value -like "*$inclusion") ) {
+        if ( ($inclusion -ne '*') -and ($value -like "*$inclusion*") ) {
             return $true # this value is included
         }
     }
@@ -150,37 +153,44 @@ function Write-ObjectToFile ([PSObject] $object, [string]$filePath, [string]$del
 
 # preload a variable with the resource types which will be excluded by default
 $defaultexcludeTypes = @(
-    'activityLogAlerts',
     'applicationSecurityGroups',
-    'automations',
     'automationAccounts',
+    'automations',
     'components',
     'connections',
     'dataCollectionRules',
     'disks',
-    'virtualMachines/extensions',
     'maintenanceConfigurations',
     'namespaces',
-    'networkWatchers',
     'networkInterfaces',
     'networkSecurityGroups',
-    'userAssignedIdentities',
-    'templateSpecs',
+    'networkWatchers',
+    'privateDnsZones',
+    'privateendpoints',
     'restorePointCollections',
     'routeTables',
     'smartDetectorAlertRules',
     'snapshots',
     'solutions',
     'storageSyncServices',
+    'templateSpecs',
     'userAssignedIdentities',
+    'userAssignedIdentities',
+    'virtualMachines/extensions',
     'virtualNetworkLinks',
     'virtualNetworks',
-    'workflows'
+    'workflows',
+    'activityLogAlerts'
 )
 
 #########################################
 # before beginning the processing, do some parameter magic first
 # 
+
+# set default for CSV field separator if needed
+if (-not $PSBoundParameters.ContainsKey('delimiter')) {
+    $delimiter = (Get-Culture).textinfo.ListSeparator
+}
 
 # if user hasn't given a billing period, we assume the previous month
 if ($billingPeriod -eq '') {
@@ -233,7 +243,8 @@ if ($WhatIf) {
             }
         }
     }
-    "types excluded by default: $defaultexcludeTypes"
+    "types excluded by default:"
+    $defaultexcludeTypes | Join-String -Separator $delimiter
    exit
 }
 
@@ -243,123 +254,86 @@ if ($WhatIf) {
 
 $countS = 0 # used for progress bar
 
-# set default for CSV field separator if needed
-if (('' -ne $outFile) -and ($delimiter -eq '')) {
-    $delimiter = (Get-Culture).textinfo.ListSeparator
-}
+$thisSubscriptionsConsumptions = @()    # all resource consumptions from all subscriptions
+$ConsumptionData = @()                  # all resources that have generated nonzero cost. In the sequel, we ignore resources
+                                        # which don't generate any cost
+$header = @{}                           # hash table (resource-names --> hash table (metric-names --> units) )
 
-# define an array and a hash table which we need later
-$ResourceCostItems = @{}    # a two-dimensional hash table, i.e. a string-indexed hash table with values that are
-                            # string-indexed hash tables with numeric values. Imagine
-                            # <table>[<resourcename>Usage][<costitem>] = <usage> and
-                            # <table>[<resourcename>Cost][<costitem>]  = <cost>
-                            # for each resources and each Cost Item. 
-                            # A Cost Item is any metric of a resource which may generate cost.
-                            # As example, for resource 'mystore' and Cost Item 'read actions', entries could be
-                            # $ResourceCostItems['mystoreUsage']['read actions'] = 120000
-                            # $ResourceCostItems['mystoreCost']['read actions'] = 0.123
-$nonZeroResources = @()     # all resources that have generated nonzero cost. In the sequel, we ignore resources
-                            # which don't generate any cost
 foreach ($subscription in $subscriptions) {
-    # initialize collector array
-    $Resources = @()            # all resources in current subscription
-    $units = @{}
-
     Select-AzSubscription $subscription | Out-Null
     $countS++ # count for 1st level progress bar
-    Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "$countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'analysing subscriptions'
-    # get all resources matching the filters
-    foreach ($resource in Get-AzResource) {
-        if ( MatchFilter $resource.ResourceType $resourceTypes ($excludeTypes + $defaultexcludeTypes)) {
-            $Resources += $resource
-        }
-    }
-    # get consumption data for all these resources
-    if ($Resources.Count -ne 0) {
-        $countRes = 0    # count for 2nd level progress bar
-        foreach ($Resource in $Resources | Sort-Object -Property ResourceType) {
-            $countRes++
-            Write-Progress -Id 2 -ParentId 1 -PercentComplete $(100*$countRes / $Resources.Count) -Status "$(($Resource.resourceType).Split('/')[-1]) ($($resource.Name), $($countRes) of $($Resources.Count) resources)" -Activity 'analysing resources'
-            $ApiDelay = 10 # used in catch block
-            do {
-                try {
-                    $ThisResourceConsumption = Get-AzConsumptionUsageDetail -BillingPeriod $billingPeriod -InstanceId $resource.Id -Expand MeterDetails -WarningAction Stop -ErrorAction Stop
-                    $ApiDelay = 0   # we use the 0 value as flag that call was successful
-                                    # comparing $ThisResourceConsumption with $null doesn't work, because even
-                                    # a successful API call may return null
-                }
-                catch {
-                    # API call failed. usually the reason is the error "too many API calls"...
-                    Write-Warning "$($_.Exception.Message) while querying billing details for resource '$($resource.Name)' in subscription '$($subscription.Name)', Delaying next try for $ApiDelay seconds."
-                    # ...so we will wait for a while...
-                    start-sleep $ApiDelay
-                    # ... and increase the delay in case the call fails again
-                    $ApiDelay = $ApiDelay * 1.5
-                }
-                # looping until call is successful or API delay becomes too large
-            } until (($ApiDelay -eq 0) -or ($ApiDelay -gt 600))
-            if ($ApiDelay -ne 0) {
-                # we use 0 to indicate a successful call, otherwise the loop above was aborted because it took too long
-                Write-Error "Get-AzConsumptionUsageDetail did not return a value for resource $resource.Name after repeated tries, aborting script."
-                exit
-            }
-            # let's first check whether this resource generated any cost at all. If not, we will skip it
-            if (($null -ne $ThisResourceConsumption -and ($ThisResourceConsumption | Measure-Object -Property PretaxCost -Sum).Sum -ne 0) ) {
-                    #  Get-AzConsumptionUsageDetail returns per-day values, but we want the sum over the billing period (=month)
-                $Resource | Add-Member -MemberType NoteProperty -Name 'SubscriptionName' -Value $subscription.Name
-                $nonZeroResources += $Resource
-                $ThisResourceConsumption | Group-Object -Property Product | ForEach-Object {
-                    # each $_ refers to a cost metric of the current resource under review
-                    # cost for this product (=cost metric) aggregated
-                    $Cost = ($_.Group | Measure-Object -property PretaxCost -Sum).Sum
-                    # usage field, also aggregated
-                    if ($showUsage) {
-                        $Usage = ($ThisResourceConsumption | Where-Object -Property Product -EQ $_.Name | Measure-Object -Property UsageQuantity -Sum).Sum
-                        $unit  = ($ThisResourceConsumption | Where-Object -Property Product -EQ $_.Name).Meterdetails.Unit[0]
-                        $units[$_.Name] = $unit
-                    }
-                    if ( ($Cost -ne 0) -or $showZeroCostItems ) {
-                        # we only want non-zero cost items
-                        $ResourceCostItems[$resource.Name + 'Cost'] += @{$_.Name = $Cost}
-                        if ($showUsage) {
-                            $ResourceCostItems[$resource.Name + 'Usage'] += @{$_.Name = $Usage}
-                        }
-                    }
-                } # foreach-object
-            } # foreach resource
-        } # if there are any cost
-        Write-Progress -Id 2 -ParentId 1 -Activity 'analysing resources' -Completed
-    } # if there are any resources
-} # foreach subscription
-Write-Progress -Id 1 -Activity 'analysing subscriptions' -Completed
+    Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status " $countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'collecting data via API from subscription'
 
-# now convert all entries into [PSCustomObject] objects which are then output, ordered by resource type
-$countRes = 0 # for progress bar
-foreach ($resourceType in ($nonZeroResources | Group-Object -Property ResourceType).Name) {
-    # we want to see only metrics that generated any cost at all
-    # and we will also prepare a header line in case user wants to have that
-    
+    #==============================================================
+    # first, get consumption data for ALL resources in the current subscription
+    $thisSubscriptionsConsumptions = ($(Get-AzConsumptionUsageDetail  -BillingPeriod $billingPeriod -Expand MeterDetails) | `
+        Select-Object @{l='Type';e={$_.InstanceId.split('/')[-2]}}, `
+        InstanceName, Product, PretaxCost, UsageQuantity, `
+            @{l='meterName';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object meterName).meterName }}, `
+            @{l='MeterCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterCategory).MeterCategory }}, `
+            @{l='MeterSubCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterSubCategory).MeterSubCategory }}, `
+            @{l='Unit';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object Unit).Unit }} | `
+        Group-Object -Property InstanceName, Product)
+    # accumulate usage and cost for the selected billing period and resource types
+    $countU = 0 # for progress bar
+    $thisSubscriptionsConsumptions | foreach-object {
+        $cost = ($_.Group | measure-object -Property PretaxCost -Sum).Sum
+        $usage = ($_.Group | measure-object -Property UsageQuantity -Sum).Sum
+        $countU++
+        Write-Progress -Id 2 -PercentComplete $($countU * 100 / $thisSubscriptionsConsumptions.Count) -Status "collecting resource data $countU of $($thisSubscriptionsConsumptions.count) ($($_.Group[0].InstanceName))" -Activity 'analyzing resource data'
+        if ( ($cost -ge 0.01) -and `
+             ( ($null -eq $resourceTypes) -or ( MatchFilter $_.Group[0].Type $resourceTypes ($excludeTypes + $defaultexcludeTypes) ) )
+           ) {
+            $newUsage = [PSCustomObject]@{
+                Subscription = $subscription.Name
+                ResourceType = $_.Group[0].Type
+                Product      = $_.Group[0].Product
+                ResourceName = $_.Group[0].InstanceName
+                Cost = $Cost
+                Usage = $usage
+                meterName = $_.Group[0].meterName
+                # just in case we want this information in some future version of the script
+<#                
+                MeterCategory = $_.Group[0].MeterCategory
+                MeterSubCategory = $_.Group[0].MeterSubCategory
+                Unit =  $_.Group[0].Unit
+#>
+                }
+            $ConsumptionData += $newUsage
+            try {
+                $header[$newUsage.ResourceType] += @{$newUsage.meterName = $_.Group[0].Unit} 
+            }
+            catch {} # ignore error if we try to create a duplicate entry
+
+        } #if cost -ne 0 & resource type matches filter
+    } # foreach resource consumption in this subscription
+    Write-Progress -Id 2 -Activity 'analyzing resource data' -Completed
+} # for all subscriptions
+Write-Progress -Id 1 -Activity 'collecting data via API from subscription' -Completed
+
+##############
+# Now let's output the actual data. We need to iterate through the resources by resource typpe,
+# because we write separate output for each resource type.
+# A resource typically has multiple entries, one for each meter which generated cost, 
+# so we iterate through the grouped resources only.
+
+$allResourceTypes = ($ConsumptionData|Group-Object -Property ResourceType -NoElement).Name
+$countRT = 0 # for progress bar
+foreach  ($resourceType in $allResourceTypes) {
+    $countRT++
+    Write-Progress -Id 1 -PercentComplete $($countRT * 100 / $allResourceTypes.count) -Status "of type $resourceType ($countRT of $($allResourceTypes.count) types)" -Activity 'collecting resources'
+
+    # all resources of the current type
+    $resourcesOfThisType = ($ConsumptionData | Where-Object -Property ResourceType -eq -Value $ResourceType)
+    # all meters for all resources of the current type
+    $meterNames = $header[$resourceType].keys
+
     if ('' -ne $outFile) {
         # user wants output to a file. For each resource type, we will generate a separate file
         # because each resource type has different cost titems
-        $outFileName = (($outFile.split('.')[0..($outFile.Count-1)])[0]).ToString() + '-' + $resourceType.Split('/')[-1] + '.' + $outFile.Split('.')[-1]
-    }
-
-    # at first, find out which cost items did generate any cost at all
-    $nonZeroCostItems = @{}
-    foreach ($resource in ($nonZeroResources | Where-Object -Property ResourceType -EQ $resourceType)) {
-        if ($null -ne $($ResourceCostItems[$resource.Name+'Cost'])) {
-            foreach ($costItem in ($ResourceCostItems[$resource.Name+'Cost']).Keys | Sort-Object) {
-                # after all resources have been analysed, we will report only the metrics where 
-                # at least one resource has a non-zero value, so add its name to a hash table
-                if ($null -ne $($ResourceCostItems[$resource.Name+'Cost'][$CostItem])) {
-                    $nonZeroCostItems[$CostItem] = ''
-                }
-            }
-        }
-    }
-    if ('' -ne $outFile) {
-        # if we want to output to a file, write a header
+        # The user gave us a file name like 'xyz.csv', and each csv file will get a special name like 'xyz-<resourcetype>.csv'
+        $outFileName = (($outFile.split('.')[0..($outFile.Count-1)])[0]).ToString() + '-' + $resourceType.Split('/')[-1] + '.' + $outFile.Split('.')[-1]        # First output the header line.
+        # The header lists optionally the usages first and then the cost
         $item = [PSCustomObject] @{
             # dummy entries for the first two members
             column1 = 'Subscription'
@@ -367,92 +341,87 @@ foreach ($resourceType in ($nonZeroResources | Group-Object -Property ResourceTy
             column3 = 'Resource Type'
         }
         $count = 4
+        # add usage header items if user wants to see that
         if ($showUsage) {
-            foreach ($metricName in $nonZeroCostItems.Keys | Sort-Object) {
-                $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($metricName + " Usage")
+            foreach ($meterName in $meterNames | Sort-Object) {
+                $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($meterName + " Usage")
                 $count++
             }
         }
-        foreach ($metricName in $nonZeroCostItems.Keys | Sort-Object) {
-            $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($metricName + " Cost")
+        foreach ($meterName in $meterNames | Sort-Object) {
+            $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($meterName + " Cost")
             $count++
         }
-        Write-ObjectToFile $item $outFileName $delimiter -force
-    }
-    # as the metrics have different scales (1s, 10000s, etc), we want to have the units as first object
-    # if you export to a CSV file, the units will form a second header line  
-    # return the units as first object "$item"
-    $item = [PSCustomObject] @{
-        # dummy entries for the first members (=fields of the header line)
-        Subscription = ''
-        Name         = ''
-        ResourceType = 'units'
-    }
-    # prepare the $item (i.e. the headline for output):
-    if ($showUsage) {
-        foreach ($CostItem in $nonZeroCostItems.Keys | Sort-Object) {
-            $unit = $units[$costitem]
-            $item | Add-Member -MemberType NoteProperty -Name $($CostItem + ' Usage') -Value $unit
-        }
-    }
-    foreach ($CostItem in $nonZeroCostItems.Keys | Sort-Object) {
-        $item | Add-Member -MemberType NoteProperty -Name $($CostItem + ' Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
-    }
+        Write-ObjectToFile $item $outFileName $delimiter
 
-    # here we output the headline stating the metrics units unless the -noUnits switch is given
-    if (-not $noUnits) {
-        if ('' -eq $outFile) {
-            $item
-        } else {
+        # in case the -noUnits switch is not given, add a second header line displaying the units
+        if (-not $noUnits) {
+            # as the metrics have different scales (1s, 10000s, etc), we want to have the units as first object
+            # if you export to a CSV file, the units will form a second header line  
+            # return the units as first object "$item"
+            $item = [PSCustomObject] @{
+                # dummy entries for the first members (=fields of the header line)
+                Subscription = ''
+                Name         = ''
+                ResourceType = 'units'
+            }
+            # add the header items for the usage metrics
+            if ($showUsage) {
+                foreach ($meterName in $meterNames) {
+                    $unit = $header[$resourceType][$meterName]
+                    $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value $unit
+                }
+            }
+            # add the current currency symbol as cost metric
+            foreach ($meterName in $meterNames) {
+                $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
+            }
+            # now write the 2nd header line
             Write-ObjectToFile $item $outFileName $delimiter
-        }
-    }
-    # now let's output the actual data
-    foreach ($resource in ($nonZeroResources | Where-Object -Property ResourceType -EQ $resourceType)) {
-        $countRes++
-        Write-Progress -Id 1 -PercentComplete $($countRes * 100 / $nonZeroResources.count) -Status "$countRes of $($nonZeroResources.count)" -Activity 'exporting data'
+        } # if not -nounits
+    } # if outFile given
+
+    # Now let's write the actual data for the resources of the given type
+    $countR = 0 # for progress bar
+    $totalCount = ($resourcesOfThisType | Group-Object -Property ResourceName -NoElement).count
+    foreach ($resourceName in ($resourcesOfThisType | Group-Object -Property ResourceName -NoElement).Name) { 
+        $countR++
+        $resourceUnderReview = ($resourcesOfThisType | Where-Object -Property ResourceName -EQ -Value $resourceName)
+        Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) of resource $resourceName" -Activity 'collecting resource details'
         # some properties of the resource
         $item = [PSCustomObject] @{
-            Subscription = $resource.SubscriptionName
-            Name         = $resource.Name
-            ResourceType = $resource.ResourceType
+            Subscription = $resourceUnderReview[0].Subscription
+            Name         = $resourceName
+            ResourceType = $ResourceType
         }
+        # add data for all meters which were discovered (some resources may not have data for all meters present)
+        # In that case, use 0 if some meter is not present for the current resource
+        # first add usage data if required, then the cost data
         if ($showUsage) {        
-            foreach ($CostItem in $nonZeroCostItems.Keys | Sort-Object) {
-                # collect all usage values of all resources
-                # note that above we have filtered out metrics that are zero across ALL resources,
-                # but some metrics may still be zero for some resources
-                # in that case, these values are not present in $ResourceCostItems
-                if ( ($null -ne $($ResourceCostItems[$resource.Name + 'Cost'])) -and
-                    ($null -ne $($ResourceCostItems[$resource.Name + 'Cost'][$CostItem])) ) {
-                    $usage = $ResourceCostItems[$resource.Name + 'Usage'][$CostItem]
+                foreach ($meterName in $meterNames) {
+                $usageItem = ($resourceUnderReview | Where-Object  -Property meterName -EQ -Value $meterName)
+                if ($null -ne $usageItem) {
+                    $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value $costItem.Usage
                 } else {
-                    $usage = 0
+                    $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value 0
                 }
-                # record the metric unit, it is used to compose the names of the
-                # members of the PSCustomObjects that will be returned to the caller
-                # add these metrics & values to the $item object
-                $item | Add-Member -MemberType NoteProperty -Name $($CostItem + ' Usage') -Value $usage
-            } # foreach cost item
-        }
-        foreach ($CostItem in $nonZeroCostItems.Keys | Sort-Object) {
-            if ( ($null -ne $($ResourceCostItems[$resource.Name + 'Cost'])) -and
-                ($null -ne $($ResourceCostItems[$resource.Name + 'Cost'][$CostItem])) ) {
-                $cost = $ResourceCostItems[$resource.Name + 'Cost'][$CostItem]
-            } else {
-                $cost = 0
             }
-            # record the metric unit, it is used to compose the names of the
-            # members of the PSCustomObjects that will be returned to the caller
-            # add these metrics & values to the $item object
-            $item | Add-Member -MemberType NoteProperty -Name $($CostItem + ' Cost') -Value $Cost
-        } # foreach cost item
+        } # if showusage 
+        foreach ($meterName in $meterNames) {
+            $costItem =  ($resourceUnderReview | Where-Object  -Property meterName -EQ -Value $meterName)
+            if ($null -ne $costItem) {
+                $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value $costItem.Cost
+            } else {
+                $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value 0
+            }
+        }
         if ('' -eq $outFile) {
             $item
         } else {
             Write-ObjectToFile $item $outFileName $delimiter
         }
-    } # foreach resource
+    } # foreach resource name
+    Write-Progress -Id 2 -Activity 'collecting resource details' -Completed
 } # foreach resource type
 
-Write-Progress -Id 1 -Activity 'exporting data' -Completed
+Write-Progress -Id 1 -Activity 'collecting resources' -Completed
