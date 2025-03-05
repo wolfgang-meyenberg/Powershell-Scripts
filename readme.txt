@@ -27,18 +27,15 @@ Parameters:
                      evaluation of these types will be skipped. Some types will
                      be excluded by default unless specified in the
                      resourceTypes parameter. See also below.
--billingPeriod       Collect cost for given billing period, format is
-                     'yyyyMMdd',default is the last month.
+-billingPeriod       Collect cost for given billing period, format is 'yyyyMM',
+                     default is the last month.
+-totals              Display the total cost per resource as last column,
+                     i.e. the sum of all cost metrics.
 -showUsage           Display usage information for each cost item additionally
                      to the cost.
--showZeroCostItems   Display cost items that are zero. Normally, these items are
-                     omitted from the output.
--noUnits             Usually the first object returned is a list of units &
-                     scales, as the metrics come in 1s, 10000s, or so. This
-                     switch will omit the units object, so that only the actual
-                     metrics are output. This is useful if one single resource
-                     type is evaluated and the output is piped into another
-                     function.
+-showUnits           Display the units for usages and cost as second header
+                     line. This is useful with the -usage switch, as the
+                     metrics come in 1s, 10000s, or so.
 -outFile             Write output to a set of CSV files. Without this parameter,
                      results are written to standard output as objects, so
                      piping them e.g. to Export-Csv will not give correct

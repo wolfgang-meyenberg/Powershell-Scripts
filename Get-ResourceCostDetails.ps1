@@ -21,17 +21,17 @@
 	Comma-separated list of resource types, evaluation of these types will be skipped.
 
 .PARAMETER billingPeriod
-	Collect cost for given billing period, format is "yyyyMMdd", default is the last month.
+	Collect cost for given billing period, format is "yyyyMM", default is the last month.
 
-.PARAMETER noUnits
-	Usually the first object returned is a list of units & scales, as the metrics come in 1s, 10000s,or so.
-    This switch will omit the units object, so that only the actual metrics are output.
+.PARAMETER totals
+    Display the total cost per resource as last column, i.e. the sum of all cost metrics.
 
 .PARAMETER showUsage
 	Display usage information for each cost item additionally to the cost.
 
-.PARAMETER showZeroCostItems
-	Display cost items that are zero. Normally, these items are omitted from the output.
+.PARAMETER showUnits
+    Display the units for usages and cost as second header line.
+    This is useful with the -usage switch, as the metrics come in 1s, 10000s, or so.
 
 .PARAMETER outFile
 	Write output to a set of CSV files. Without this switch, results are written to standard output as objects.
@@ -55,8 +55,8 @@ Get-ResourceCostDetails.ps1 -subscriptionFilter mySubs002 -resourceTypes *,route
     To see which resource types are excluded by default (unless specifically listed in -resourceTypes parameter), call script with -WhatIf parameter.
 
 .EXAMPLE
-Get-ResourceCostDetails.ps1 -subscriptionFilter * -resourceTypes virtualMachines,storageAccounts -billingPeriod 20240501 -outFile result.csv
-	Analyze virtual machines and storage accounts in the all accessible subscriptions and write result to a set of CSV files.
+Get-ResourceCostDetails.ps1 -subscriptionFilter * -resourceTypes virtualMachines,storageAccounts -billingPeriod 202405 -outFile result.csv
+	Analyze virtual machines and storage accounts for billing period May 2024 in all accessible subscriptions and write result to a set of CSV files.
     For the two resource types, two separate files will be created named "result-virtualMachines.csv" and "result-storageAccounts.csv"
 #>
 
@@ -74,14 +74,17 @@ Param (
     [SupportsWildcards()]
     [string[]] $excludeTypes = @(), 
 
-    [Parameter(HelpMessage="billing period in the format DDMMYYYY")]
+    [Parameter(HelpMessage="billing period for which data is collected, format is 'yyyymm'")]
     [string] $billingPeriod = '',
 
-    [switch] $showUsage,
-    
-    [switch] $showZeroCostItems,
+    [Parameter(HelpMessage="display total cost per resource as last column")]
+    [switch] $totals,
 
-    [switch] $noUnits,
+    [Parameter(HelpMessage="display usage metrics additional to cost")]
+    [switch] $showUsage,
+
+    [Parameter(HelpMessage="show the units and scale for the metrics")]
+    [switch] $showUnits,
 
     [Parameter(ParameterSetName="default", HelpMessage="first part of filename for output CSV file (resource type will be added to filename(s))")]
     [Parameter(ParameterSetName="outputToFile", HelpMessage="first part of filename for output CSV file (resource type will be added to filename(s))", Mandatory)]
@@ -90,9 +93,8 @@ Param (
     [Parameter(ParameterSetName="outputToFile", HelpMessage="character to be used as delimiter")]
     [string] [ValidateLength(1,1)] $delimiter,
 
-    [switch] $WhatIf,
-
-    [switch] $help
+    [Parameter(HelpMessage="display about subscriptions adn resorces that would be analysed. Also displays the resource types which are excludedd by default")]
+    [switch] $WhatIf
 )
 
 # necessary modules:
@@ -194,7 +196,8 @@ if (-not $PSBoundParameters.ContainsKey('delimiter')) {
 
 # if user hasn't given a billing period, we assume the previous month
 if ($billingPeriod -eq '') {
-    $billingPeriod = $((Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM") + '01')
+#    $billingPeriod = $((Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM") + '01')
+    $billingPeriod = (Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM")
 }
 
 # we collect all subscription names matching any of the filter expressions
@@ -352,10 +355,16 @@ foreach  ($resourceType in $allResourceTypes) {
             $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($meterName + " Cost")
             $count++
         }
+        # add 'totals' column header in case user wants to see totals
+        if ($totals) {
+            $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ("Total Cost")
+            $count++
+        }
+        # now write the header
         Write-ObjectToFile $item $outFileName $delimiter
 
-        # in case the -noUnits switch is not given, add a second header line displaying the units
-        if (-not $noUnits) {
+        # in case the -showUnits switch is given, add a second header line displaying the units
+        if ($showUnits) {
             # as the metrics have different scales (1s, 10000s, etc), we want to have the units as first object
             # if you export to a CSV file, the units will form a second header line  
             # return the units as first object "$item"
@@ -376,9 +385,13 @@ foreach  ($resourceType in $allResourceTypes) {
             foreach ($meterName in $meterNames) {
                 $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
             }
+            if ($totals) {
+                $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
+                $count++
+            }
             # now write the 2nd header line
             Write-ObjectToFile $item $outFileName $delimiter
-        } # if not -nounits
+        } # if -showUnits
     } # if outFile given
 
     # Now let's write the actual data for the resources of the given type
@@ -407,13 +420,18 @@ foreach  ($resourceType in $allResourceTypes) {
                 }
             }
         } # if showusage 
+        $totalCost = 0  # we may need to collect total cost
         foreach ($meterName in $meterNames) {
             $costItem =  ($resourceUnderReview | Where-Object  -Property meterName -EQ -Value $meterName)
             if ($null -ne $costItem) {
                 $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value $costItem.Cost
+                $totalCost += $costItem.Cost
             } else {
                 $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value 0
             }
+        }
+        if ($totals) {
+            $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value $totalCost
         }
         if ('' -eq $outFile) {
             $item
