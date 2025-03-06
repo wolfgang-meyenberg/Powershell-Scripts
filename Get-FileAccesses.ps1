@@ -1,48 +1,53 @@
-﻿Param (
+﻿<#
+.SYNOPSIS
+Provides count and size statistics about file extensions and ages on file storages.
+
+.DESCRIPTION
+Displays information about size and count of files on a given file share.
+Statistics are given grouped by file age and/or file extension.
+
+.PARAMETER ServerName
+Mandatory. Collect statistics of files on the given server.
+
+.PARAMETER ShareName
+Analyzes files on the given share. If omitted, analyzes data on all non-hidden shares of the given server.
+
+.PARAMETER onAccess
+For determining file age, use the LastAccess property. The default behaviour is to use the lastWrite property.
+
+.PARAMETER noAges
+Do not group files by age, just group by file extension.
+
+.PARAMETER noExtensions
+Do not group files byextension, just group by file age.
+
+.PARAMETER Priority
+Starts process with given priority. Use with care.
+
+.EXAMPLE
+Get-FileAccesses -ServerName <myserver> -ShareName <myshare> | ft -Property *
+List file count and size, grouped by extension and age, based on last written date
+
+.EXAMPLE
+Get-FileAccesses -ServerName <myserver> -ShareName <myshare> -onAccess -noExtensions
+List file count and size, grouped  by age, based on last accessed date, and formatted as table
+
+#>
+
+Param (
     [Parameter(ParameterSetName='default', Mandatory, Position=1)] [string] $ServerName,
     [Parameter(ParameterSetName='default', Position=2)] [string] $ShareName = '*', 
     [Parameter(ParameterSetName='default', Position=3)] [switch] $onAccess,
     [Parameter(ParameterSetName='default', Position=4)] [switch] $noExtensions,
     [Parameter(ParameterSetName='default', Position=5)] [switch] $noAges,
-    [Parameter(ParameterSetName='default', Position=6)][ValidateSet('BelowNormal', 'Normal', 'AboveNormal', 'High', 'Realtime')] [string] $Priority = 'Normal',
-    [Parameter(ParameterSetName='help')] [Alias('h')] [switch] $help
+    [Parameter(ParameterSetName='default', Position=6)][ValidateSet('BelowNormal', 'Normal', 'AboveNormal', 'High', 'Realtime')] [string] $Priority = 'Normal'
 )
-
-if ($help) {
-    'NAME'
-    'Get-FileAccesses'
-    ''
-    'PURPOSE'
-    'provides count and size statistics about file extensions and ages on file storages'
-    ''
-    'USAGE'
-    'Get-FileAccesses -serverName <servername> [-shareName <sharename>] [-onAccess] [-noAges] [-noExtensions] [-priority (BelowNormal | Normal | AboveNormal | High | Realtime)]'
-    '    -ServerName   Mandatory, evaluates data on given share(s) of <servername>'
-    '    -ShareName    Analyzes files on the given share.'
-    '                  If omitted, analyzes data on all non-hidden shares of the given server.'
-    '    -onAccess     Uses lastAccess for age calculation.'
-    '                  If omitted, uses lastWrite for age calculation'
-    '    -noAges       Ignores file age, lists by extensions only (if -noExtensions is not given)'
-    '    -noExtensions Ignores extensions, lists by age only (if -noAge is not given)'
-    '                  If BOTH -no... switches are given, script only returns total'
-    '                  file count and size'
-    '    -Priority     Starts process with given priority. Use with care.'
-    '                  Possible values are BelowNormal | Normal | AboveNormal | High | Realtime'
-    ''
-    'EXAMPLES'
-    'to list file count and size by age, based on last accessed date'
-    'Get-FileAccesses -ServerName myserver -ShareName myshare -onAccess -noExtensions'
-    ''
-    'to see all properties in table format, use ft -Property *'
-    'Get-FileAccesses -ServerName myserver -ShareName myshare | ft -Property *'
-    ''
-    exit
-}
 
 if ($Priority -ne 'Normal') {
     [System.Threading.Thread]::CurrentThread.Priority = $Priority
 }
 
+# group files by these intervals:
 $SPAN_DAY = 0
 $SPAN_WEEK = 1
 $SPAN_MONTH = 2
@@ -53,7 +58,6 @@ $SPAN_5YEARS = 6
 $SPAN_10YEARS = 7
 $SPAN_15YEARS = 8
 $SPAN_OLDER = 9
-
 function SpanToText ([int] $span)
 {
     if ($span -eq $SPAN_DAY) { return '1d' }
@@ -68,7 +72,6 @@ function SpanToText ([int] $span)
     if ($span -eq $SPAN_OLDER) { return 'older' }
 }
 
-
 # 2-dimensional arrays
 # 1st index = age
 # 2nd index = extension
@@ -82,7 +85,7 @@ if ($shareName -eq '*') {
     $shares = ,$shareName     # the leading comma makes this a (one-item) array
 }
 
-$countSh = 0
+$countSh = 0 # for progress bar
 
 foreach ($share in $Shares) {
     $accessFileCounts =  @(@{},@{},@{},@{},@{},@{},@{},@{},@{},@{})
@@ -107,26 +110,26 @@ foreach ($share in $Shares) {
             }
             if ($noAges) { $dd = 0 }
                 # calculate index for files depending on age
-            if ($dd -lt 1) {
-                $age = $SPAN_DAY
+            if ($dd -lt 1) {
+                $age = $SPAN_DAY
             } elseif ($dd -lt 7) {
-                $age = $SPAN_WEEK
+                $age = $SPAN_WEEK
             } elseif ($dd -lt 30) {
-                $age = $SPAN_MONTH
+                $age = $SPAN_MONTH
             } elseif ($dd -lt 365) {
-                $age = $SPAN_YEAR
+                $age = $SPAN_YEAR
             } elseif ($dd -lt 730) {
-                $age = $SPAN_2YEARS
+                $age = $SPAN_2YEARS
             } elseif ($dd -lt 1096) {
-                $age = $SPAN_3YEARS
+                $age = $SPAN_3YEARS
             } elseif ($dd -lt 1826) {
-                $age = $SPAN_5YEARS
+                $age = $SPAN_5YEARS
             } elseif ($dd -lt 3652) {
-                $age = $SPAN_10YEARS
+                $age = $SPAN_10YEARS
             } elseif ($dd -lt 5479) {
-                $age = $SPAN_15YEARS
+                $age = $SPAN_15YEARS
             } else {
-                $age = $SPAN_OLDER
+                $age = $SPAN_OLDER
             }
                 # increase file count
             $accessFileCounts[$age][$ext] ++
@@ -141,27 +144,27 @@ foreach ($share in $Shares) {
             }
         if (-not $noAges) {
             For ($age=0; $age -le $SPAN_OLDER; $age++) {
-                if ($accessFileCounts[$age][$extension] -eq $null -or $accessFileCounts[$age][$extension] -eq 0) {
+                if ($null -eq $accessFileCounts[$age][$extension] -or $accessFileCounts[$age][$extension] -eq 0) {
                     $result | Add-Member -MemberType NoteProperty -Name $('num ' + $(SpanToText $age)) -Value 0
                 } else {
                     $result | Add-Member -MemberType NoteProperty -Name $('num ' + $(SpanToText $age)) -Value $accessFileCounts[$age][$extension]
                 }
             }
             For ($age=0; $age -le $SPAN_OLDER; $age++) {
-                if ($accessFileSizesMB[$age][$extension] -eq $null -or $accessFileSizesMB[$age][$extension]-eq 0) {
+                if ($null -eq $accessFileSizesMB[$age][$extension] -or $accessFileSizesMB[$age][$extension]-eq 0) {
                     $result | Add-Member -MemberType NoteProperty -Name $('MB ' + $(SpanToText $age)) -Value 0
                 } else {
                     $result | Add-Member -MemberType NoteProperty -Name $('MB ' + $(SpanToText $age)) -Value $accessFileSizesMB[$age][$extension]
                 }
             }
         } else {
-            if ($accessFileCounts[0][$extension] -eq $null -or $accessFileCounts[$age][$extension] -eq 0) {
+            if ($null -eq $accessFileCounts[0][$extension] -or $accessFileCounts[$age][$extension] -eq 0) {
                 $result | Add-Member -MemberType NoteProperty -Name $('num') -Value 0
             } else {
                 $result | Add-Member -MemberType NoteProperty -Name $('num') -Value $accessFileCounts[0][$extension]
             }
 
-            if ($accessFileSizesMB[0][$extension] -eq $null -or $accessFileCounts[$age][$extension] -eq 0) {
+            if ($null -eq $accessFileSizesMB[0][$extension] -or $accessFileCounts[$age][$extension] -eq 0) {
                 $result | Add-Member -MemberType NoteProperty -Name $('MB') -Value 0
             } else {
                 $result | Add-Member -MemberType NoteProperty -Name $('MB') -Value $accessFileSizesMB[0][$extension]

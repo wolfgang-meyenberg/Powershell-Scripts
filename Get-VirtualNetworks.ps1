@@ -1,4 +1,15 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'default')]
+﻿<#
+.SYNOPSIS
+
+.DESCRIPTION
+
+.PARAMETER VMType
+
+.EXAMPLE
+
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,

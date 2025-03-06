@@ -228,7 +228,7 @@ Get-AzureResourceData -subscriptionFilter <filterexpression> [-all] ...
 -subscriptionFilter Single filter or comma-separated list of filters.
                     All subscriptions whose name matches the filter
                     expression will be analysed.
--VMs                Show VMs and their properties
+-VM                 Show VMs and their properties
 -SqlServer          Show SQL server VM properties
 -DbAas              Show Azure SQL (databases aaS)
 -Storage            Show storage accounts

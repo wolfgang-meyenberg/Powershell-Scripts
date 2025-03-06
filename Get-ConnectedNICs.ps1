@@ -1,10 +1,26 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'default')]
+﻿<#
+.SYNOPSIS
+Lists virtual NICs from selected subscription(s) and some of their properties.
+
+.DESCRIPTION
+ Lists network interfaces from selected subscription(s) with IP address, VNet name, network address and DNS record, and can also test whether NIC is responding to pings
+
+.PARAMETER subscriptionFilter
+Mandatory. List NICs in subscriptions matching the filter
+
+.PARAMETER outFile
+writes results to a semicolon-separated CSV format if this parameter is given
+
+.PARAMETER noPing
+skips testing whether the NIC is responding to a ping
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,
     [Parameter(ParameterSetName="default", Position=1)] [string] $outFile = '',
-    [Parameter(ParameterSetName="default", Position=2)] [switch] $noPing,
-    [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
+    [Parameter(ParameterSetName="default", Position=2)] [switch] $noPing
 )
 
 function Int64ToIPString ([int64] $value)
@@ -58,21 +74,6 @@ function OutputSubnetInfo ([string] $addressPrefix)
 # ========== BEGIN MAIN ================
 #
 #
-if ($help) {
-    "NAME"
-    "    Get-ConnectedNICs"
-    ""
-    "SYNTAX"
-    "    Get-ConnectedNICs -subscriptionFilter <filterexpression> [-outFile <outfilename>] [-noPing]"
-    ""
-    "    Lists network interfaces with IP address, VNet name, network address and DNS record,"
-    "    also tests whether NIC is responding to pings"
-    "    -subscriptionFilter  mandatory parameter, list NICs in subscriptions matching the filter"
-    "    -outFile             writes results to a semicolon-separated CSV format if this parameter is given"
-    "    -noPing              skips testing whether the NIC is responding to a ping"
-    ""
-    exit
-}
 
 if ($subscriptionFilter -ne '*') {
     $subscriptionFilter = "*$subscriptionFilter*"
@@ -99,7 +100,7 @@ $result = $(
                     $IpId = ($IpConfiguration.Id) -split '/'
                     # get the NIC using its name and resource group
                     $Nic = Get-AzNetworkInterface -ResourceGroupName $IpId[4] -Name $IpId[8] -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
-                    if ($Nic -eq $null -or $Nic.VirtualMachine -eq $null) {
+                    if ($null -eq $Nic -or $null -eq $Nic.VirtualMachine) {
                         # there may be no NIC, or the NIC may not be attached to a VM
                         continue
                     }
@@ -110,7 +111,7 @@ $result = $(
                     $VmName = ($nic.VirtualMachine.Id -split '/')[8]
                     # try top see whether this VM is known to DNS
                     $DnsRec=Resolve-DnsName $VmName -QuickTimeout -ErrorAction Ignore
-                    If ($DnsRec -ne $null) {
+                    If ($null -ne $DnsRec) {
                         $DnsName = $DnsRec.Name
                     } else {
                         $DnsName = '(none)'

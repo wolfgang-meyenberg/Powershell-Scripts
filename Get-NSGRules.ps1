@@ -1,4 +1,24 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'BriefDetails')]
+﻿<#
+.SYNOPSIS
+ Lists the effects of NSG rules in the given subscriptions in a summarized or detailed way
+
+.DESCRIPTION
+Lists the effects of NSG rules in the given subscriptions in a summarized or detailed way.
+By default, overlapping rules, IP ranges and ports are merged, so the output will provide an overview about ports that are open within the subscription, regardless of subnets.
+This is useful to see e.g. whether ANY-ANY rules exist or critical ports are open at all.
+For a further analysis, use the -details switch, which will list individual rules
+
+.PARAMETER subscriptionFilter
+Mandatory. Analyse NSGs in given subscription(s).
+
+.PARAMETER briefDetails
+Display open ports, aggregated by source and destination network.
+
+.PARAMETER details
+Display open ports for each individual NSG rule.
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'BriefDetails')]
 
 Param (
     [Parameter(ParameterSetName="NoDetails", Mandatory=$true, Position=0)]
@@ -10,27 +30,8 @@ Param (
     [switch] $briefDetails,
 
     [Parameter(ParameterSetName="AllDetails", Position=1)]
-    [switch] $details,
-
-    [Parameter(ParameterSetName="help")] [Alias("h")]
-    [switch] $help
+    [switch] $details
 )
-
-if ($help) {
-    "NAME"
-    "    Get-NSGRules"
-    ""
-    "SYNTAX"
-    "    Get-NSGRules -subscriptionFilter <filterexpression> [-details | -briefDetails] "
-    ""
-    "Lists the NSG rules in the given subscriptions in a summarized or detailed way"
-    "   -subscriptionfilter  mandatory parameter, list NSGs in subscriptions matching the filter"
-    "   -details             list all rules in order of their priority"
-    "   -briefDetails        list every rule, but fewer details"
-    "                        if neither ""details"" switch is present, then all open ports are listed, regardless of the actual source and target networks"
-    ""
-    exit
-}
 
 # ============  CLASS DEFINITIONS ============
 
@@ -269,7 +270,7 @@ foreach ($subscription in $subscriptions) {
                 $index = $rule.SourceAddressPrefix[0] + '|' + $rule.destinationAddressPrefix[0] + '|' + $rule.Protocol.ToLower() + '|' + $rule.Access
                 # use $portIntervals as an intermediate variable
                 $portIntervals = $protocolPorts[$index]
-                if ($portIntervals -eq $null) {
+                if ($null -eq $portIntervals) {
                     # $protocolPorts doesn't yet have an entry for this source-destination-protocol combination
                     $portIntervals = [Int32IntervalList]::new()
                 }
@@ -302,7 +303,7 @@ foreach ($subscription in $subscriptions) {
                 # here, we use only the protocol and access (allow/deny) as index for $protocolPorts, which is an associative array (=hash table)
                 $index = $rule.Protocol.ToLower() + "|" + $rule.Access
                 $portIntervals = $protocolPorts[$index]
-                if ($portIntervals -eq $null) {
+                if ($null -eq $portIntervals) {
                     # $protocolPorts doesn't yet have an entry for this protocol
                     $portIntervals = [Int32IntervalList]::new()
                 }

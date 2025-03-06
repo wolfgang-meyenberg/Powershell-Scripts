@@ -1,28 +1,88 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'default')]
+﻿<#
+.SYNOPSIS
+Returns information and usage/load metrics for resources of one or more types in selected subscription(s)
+
+.DESCRIPTION
+Returns information and usage/load metrics for resources of one or more of these resource types:
+VMs, SQL servers, SQL Databases, Storage Accounts, Snapshots
+May also return the count and cumulated cost of all resources in given subscription(s), see -ResourceList switch
+
+NOTE:
+The script can easily be adjusted to add or remove metrics that shall be reported.
+you may adjust this script e.g. to add or remove metrics.
+These parts of the code are marked with # >>>>> and # <<<<<. Refer to the comments inside the code for further information.
+
+.PARAMETER subscriptionFilter
+Mandatory. Single filter or comma-separated list of filters. All subscriptions whose names contain the filter expression will be analysed.
+You can use the -WhatIf switch to find out which subscriptions would be analyzed.
+
+.PARAMETER VM
+show virtual machines' properties
+
+.PARAMETER SqlServer
+show SQL server VM properties
+
+.PARAMETER DbAas
+show Azure SQL databases' (databases as-a-service) properties
+
+.PARAMETER Storage
+show storage accounts' properties
+
+.PARAMETER Snapshot
+show snapshots' properties
+
+.PARAMETER all
+all of the above switches
+
+.PARAMETER lastHours
+collect metrics within the given time period, default is 24 hours
+
+.PARAMETER ResourceList
+show count of resource types in subscription(s) and cumulative cost
+
+.PARAMETER details
+to be used with -ResourceList. Show details for each resource rather than count and cumulative cost
+
+.PARAMETER billingPeriod
+collect resource cost for given billing period, default is the last month. The format for the billing period is 'yyyymm'
+
+.PARAMETER outFile
+if given, exports result into a CSV file
+                            NOTE: separate files will be created for different resource types.
+                            Two characters will be added to the file names to make them different.
+.PARAMETER separator
+separator for items in CSV file, default is semicolon
+
+.PARAMETER WhatIf
+Just display the names of the subscriptions which would be analysed
+
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)]
     [Parameter(ParameterSetName="WhatIf", Mandatory, Position=0)]
     [Parameter(ParameterSetName="defaultAll", Mandatory, Position=0)] [string[]] $subscriptionFilter,
-    [Parameter(ParameterSetName="default")] [switch] $VMs,
+    [Parameter(ParameterSetName="default")] [switch] $VM,
     [Parameter(ParameterSetName="default")] [switch] $SqlServer,
     [Parameter(ParameterSetName="default")] [switch] $DbAas,
     [Parameter(ParameterSetName="default")] [switch] $Storage,
     [Parameter(ParameterSetName="default")] [switch] $Snapshot,
     [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [switch] $all,
+    [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [switch] $ResourceList,
     [Parameter(ParameterSetName="default")]
-    [Parameter(ParameterSetName="defaultAll")] [string] $billingPeriod = '',
-    [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [switch] $details,
-    [Parameter(ParameterSetName="defaultAll")] [switch] $all,
+    [Parameter(ParameterSetName="default")]
+    [Parameter(ParameterSetName="defaultAll")] [string] $billingPeriod = '',
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [Int32] $lastHours = 24,
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [string] $outFile,
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [string] $separator = ';',
-    [Parameter(ParameterSetName="help", Mandatory)] [Alias("h")] [switch] $help,
     [switch] $WhatIf
 )
 
@@ -30,41 +90,6 @@ Param (
 # Azure
 # SQLServer
 
-#######################
-# display usage help and exit
-#
-if ($help) {
-    "NAME"
-    "    Get-AzureResourceData"
-    ""
-    "SYNTAX"
-    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-VMs] [-SqlServer] [DbAas] [-Storage] [-ResourceList [-details] [-billingPeriod <billingperiod>]] [-outFile <filename> [-separator]]"
-    "    Get-AzureResourceData -subscriptionFilter <filterexpression> [-all]  ..."
-    ""
-    "    Returns a list of resources of selected type(s) in selected subscription(s), along with some properties and metrics"
-    ""
-    "    -subscriptionFilter single filter or comma-separated list of filters. All subscriptions whose name"
-    "                        contain the filter expression will be analysed."
-    "    -VMs                show VMs and their properties"
-    "    -SqlServer          show SQL server VM properties"
-    "    -DbAas              show Azure SQL (databases aaS)"
-    "    -Storage            show storage accounts"
-    "    -Snapshot           show snapshots"
-    "    -all                all of the above switches"
-    "    -lastHours          collect metrics within the given time period, default is 24 hours"
-    "    -ResourceList       show count of resource types in subscription"
-    "    -billingPeriod      collect resource cost for given billing period, default is the last month"
-    "    -details            show list of resources in subscription"
-    "    -outFile            if given, exports result into a CSV file"
-    "                        NOTE: separate files will be created for different resource types."
-    "                        Two characters will be added to the file names to make them different."
-    "    -separator          separator for items in CSV file, default is semicolon"
-    "    -WhatIf             Just display the names of the subscriptions which would be analysed"
-    ""
-    "    NOTE: you may adjust this script e.g. to add or remove metrics. These parts of the code"
-    "          are marked with # >>>>> and # <<<<<. Refer to the comments for further information."
-    exit
-}
 
 ########
 # some values which we use as scales.
@@ -83,7 +108,7 @@ class scale {
 # extract some data from an array of VM metrics and add them to a PSObject
 # The metric reults will be added as new properties to an existing object 
 # of type PSCustomObject.
-# For each metric, the maximum and average values of the last 24 hours will be added.
+# For each metric, the maximum and average values of the last <lasthours> hours will be added.
 #
 # parameters:
 #    $psObject      Object of type PSCustomObject. The metric results will be added
@@ -98,7 +123,7 @@ class scale {
 #                   which e.g. makes sense for memory reported in bytes to be output as GB.
 #                   Default is 1
 #    $maxThreshold  Optional. If given, reports the percentage of data points where the metric
-#                   value is larger than <maxThreshold> % of the absolute 24-hour maximum
+#                   value is larger than <maxThreshold> % of the absolute <lasthours> maximum
 #    $totals        report the Totals value. Some metrics don't come with meaningful max or avg values,
 #                   but totals should be used.
 #    $timeGrain     Optional. Granularity for taking the metric. Default is 00:01:00 (1 minute).
@@ -161,7 +186,6 @@ function DisplayMetricProgress ([Int64] $item, [Int64] $total) {
     }
 }
 
-
 # ################# BEGIN MAIN #################
 #
 #
@@ -172,7 +196,7 @@ function DisplayMetricProgress ([Int64] $item, [Int64] $total) {
 
 # the -all switch includes all details except ResourceList
 if ($all) {,
-    $VMs = $true
+    $VM = $true
     $SqlServer = $true
     $DbAas = $true
     $Storage = $true
@@ -196,9 +220,8 @@ foreach ($filter in $subscriptionFilter) {
 }
 
 if ($billingPeriod -eq '') {
-    $billingPeriod = $((Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM") + '01')
+    $billingPeriod = (Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM")
 }
-
 
 # next command may fail if we haven't logged on to Azure first
 try {
@@ -240,8 +263,8 @@ $Storage_Result  = @()
 $Resource_Result = @()
 
 # We iterate through all subscriptions:
-# In the innter loop(s), we iterate through a specific resource type, and possible some dependent resources (e.g. VMs and then their disks).
-# In the inner loops, note the lines reading:  $xyz_Result += $( ...
+# In the inner loop(s), we iterate through a specific resource type, and possible some dependent resources (e.g. VMs and then their disks).
+# In the inner loops, note the lines reading:  $xyz_Result += $( ... )
 # The data for each individual resource (sizes, metrics, etc.) are collected into objects of type [PSCustomObject].
 # The output of the script shall be a list of these objects, so that the script output can be piped into some further process.
 # As these objects will have properties which depend on the object type, we collect the objects of a certain type first.
@@ -251,60 +274,59 @@ foreach ($subscription in $subscriptions) {
     Select-AzSubscription $subscription | Out-Null
     $countS++ # count for 1st level progress bar
     Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "analyzing subscription $countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'iterating through subscriptions'
-    if ($VMs) {
+    if ($VM) {
         $VM_Result += $( 
             $VMResources = @(Get-AzVM | Sort-Object -Property Name)
             $countVM = 0 # count for 2nd level progress bar
-            foreach ($VM in $VMResources) {
+            foreach ($VMResource in $VMResources) {
                 $countVM++
-                Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMResources.count) -Status "analyzing VM $countVM of $($VMResources.count) ($($VM.Name))" -Activity 'analyzing VMs'
+                Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMResources.count) -Status "analyzing VM $countVM of $($VMResources.count) ($($VMResource.Name))" -Activity 'analyzing VMs'
                 # make SKU names a little shorter, so delete the 'Standard_' part from the SKU
-                $VmSku = ($VM | Select-Object -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
+                $VmSku = ($VMResource | Select-Object -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
                 # we also want CPU count and RAM size
-                $VmSize = Get-AzVMSize -VMName $VM.Name -ResourceGroupName $VM.ResourceGroupName | Where-Object -p Name -EQ $VM.HardwareProfile.VmSize
+                $VmSize = Get-AzVMSize -VMName $VMResource.Name -ResourceGroupName $VMResource.ResourceGroupName | Where-Object -p Name -EQ $VMResource.HardwareProfile.VmSize
                 # collect info about data disks
-                $vmDisks = $VM.StorageProfile.DataDisks | Measure-Object -Property DiskSizeGB -Sum
+                $vmDisks = $VMResource.StorageProfile.DataDisks | Measure-Object -Property DiskSizeGB -Sum
                 # create a PSCustomObject
                 # if we need to report more details (see 'AddMetrics' statements below), then the object will be extended as necessary
                 $item = [PSCustomObject] @{
                         Subscription   = $($subscription.Name)
-                        Name           = $($VM.Name)
+                        Name           = $($VMResource.Name)
                         Sku            = $VmSku
                         CPUs           = $($VmSize.NumberOfCores)
                         MemGB          = [Math]::Truncate($($VmSize.MemoryInMB) / 1024)
-                        OsType         = $($VM.StorageProfile.OsDisk.OsType)
-                        OsVersion      = $($VM.StorageProfile.ImageReference.Offer)
-                        OsExactVersion = $($VM.StorageProfile.ImageReference.ExactVersion)
-                        OsDiskSize     = $(Get-AzDisk -DiskName $VM.StorageProfile.OsDisk.Name).DiskSizeGB
+                        OsType         = $($VMResource.StorageProfile.OsDisk.OsType)
+                        OsVersion      = $($VMResource.StorageProfile.ImageReference.Offer)
+                        OsExactVersion = $($VMResource.StorageProfile.ImageReference.ExactVersion)
+                        OsDiskSize     = $(Get-AzDisk -DiskName $VMResource.StorageProfile.OsDisk.Name).DiskSizeGB
                         MaxDisks       = $($VmSize.MaxDataDiskCount)
                         DataDisks      = $($VmDisks).Count
                         DataDisksSize  = $($VmDisks).Sum
-
                     }
 
                 # get VM Performance metrics
 # >>>>> THIS SECTION CAN EASILY CHANGED IN CASE YOU NEED DIFFERENT METRICS 
 # >>>>> Collecting metrics takes some time, so you may use the DisplayMetricProgress function
-# >>>>> This is however fuilly optional, you can also delete all calls to DisplayMetricProgress
+# >>>>> This is however fully optional, you can also delete all calls to DisplayMetricProgress
                 DisplayMetricProgress 1 5
 
 # >>>>> To add a metric to a resource, call the AddMetrics function.
 # >>>>> See there  for a detailed description of the parameters.
 # >>>>> The next line collects the 'Percentage CPU' metric and adds the MaxCPU and AvgCPU properties to the $item object
-# >>>>> the scale factor is one, and the '80' indcates that we also want a property (named MaxPctCPU) that shows how many
+# >>>>> the scale factor is one, and the '80' indicates that we also want a property (named MaxPctCPU) that shows how many
 # >>>>> minutes of the day the CPU load was higher than 80% of the day's maximal load
-                AddMetrics ([ref]$item) $VM.Id 'Percentage CPU' 'CPU' ([scale]::unit) 80
+                AddMetrics ([ref]$item) $VMResource.Id 'Percentage CPU' 'CPU' ([scale]::unit) 80
 
 # >>>>> Here, we collect the 'Available Memory Bytes' and add the MaxMemMB and AvgMemMB properties, scaled as MiBytes,
                 DisplayMetricProgress 2 5
-                AddMetrics ([ref]$item) $VM.Id 'Available Memory Bytes' 'MemMB' ([scale]::mega)
+                AddMetrics ([ref]$item) $VMResource.Id 'Available Memory Bytes' 'MemMB' ([scale]::mega)
 
                 DisplayMetricProgress 3 5
-                AddMetrics ([ref]$item) $VM.Id 'Data Disk Queue Depth' 'DiskQ' ([scale]::unit)
+                AddMetrics ([ref]$item) $VMResource.Id 'Data Disk Queue Depth' 'DiskQ' ([scale]::unit)
                 DisplayMetricProgress 4 5
-                AddMetrics ([ref]$item) $VM.Id 'Network In Total' 'NwInMB' ([scale]::mega)
+                AddMetrics ([ref]$item) $VMResource.Id 'Network In Total' 'NwInMB' ([scale]::mega)
                 DisplayMetricProgress 5 5
-                AddMetrics ([ref]$item) $VM.Id 'Network Out Total' 'NwOutMB' ([scale]::mega)
+                AddMetrics ([ref]$item) $VMResource.Id 'Network Out Total' 'NwOutMB' ([scale]::mega)
 # <<<<<
                 # now return the created object with its properties
                 # as we are inside a $( statements... ) block, the returned object will be caught by the
@@ -312,7 +334,7 @@ foreach ($subscription in $subscriptions) {
                 $item
 
                 DisplayMetricProgress 0 5
-            } # foreach VM
+            } # foreach VMResource
         )
     } # if VMs
 
@@ -384,11 +406,6 @@ foreach ($subscription in $subscriptions) {
                             Kind        = $StorageAccount.Kind
                             Public      = $StorageAccount.AllowBlobPublicAccess
                         }
-
-                        $ThisResourceConsumption = Get-AzConsumptionUsageDetail -BillingPeriod $billingPeriod -InstanceId $StorageAccount.Id
-                        $ThisResourceConsumption | Group-Object -Property Product | ForEach-Object {
-                            $Cost = $_.Group | Measure-Object -property PretaxCost -Sum
-                        }
                     $item
                 } # foreach storage account
             )
@@ -439,14 +456,14 @@ foreach ($subscription in $subscriptions) {
                     $countRes++
                     Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countRes * 100 / $Resources.count) -Status "analyzing $($Resources.Count) Resources" -Activity 'analyzing Resources'
                     # get resource cost for previous month
-                    if ($allResourceCost -ne $null) {
+                    if ($null -ne $allResourceCost) {
                         $resourceCost = $($allResourceCost | Where-Object -Property InstanceId -EQ $Resource.ResourceId | Measure-Object -Property PretaxCost -Sum).Sum
                     } else {
                         $resourceCost = $null
                     }
                     if ($details) {
                         # we want to see every resource
-                        if ($resourceCost -eq $null -or $resourceCost -eq 0) { $resourceCost = 'n/a' }
+                        if ($null -eq $resourceCost -or $resourceCost -eq 0) { $resourceCost = 'n/a' }
                         $item = [PSCustomObject] @{
                                 Subscription      = $($subscription.Name)
                                 Type              = $Resource.ResourceType
@@ -458,7 +475,7 @@ foreach ($subscription in $subscriptions) {
                         # we want to see just the count of resources by type
                         $resourceType = $Resource.ResourceType
                         $resourceCount[$resourceType]++
-                        if ($resourceCost -ne $null) {
+                        if ($null -ne $resourceCost) {
                             $totalResourceCost[$resourceType] += $resourceCost
                         }
                     }
@@ -485,11 +502,10 @@ foreach ($subscription in $subscriptions) {
 } # foreach subscription
 Write-Progress -Id 1 -Completed -Activity 'Subscriptions'
 
-
 if (-not $outFile) {
     # Output to stdout as object
 
-    if ($VMs) {
+    if ($VM) {
         $VM_Result
     }
 
@@ -517,7 +533,7 @@ if (-not $outFile) {
         $outFile += '.csv'
     }
 
-    if ($VMs -and $VM_Result) {
+    if ($VM -and $VM_Result) {
         $VM_Result | Export-Csv -Path $($outFile -replace '\.', '_VM.') -Delimiter $separator -NoTypeInformation
     }
     if ($SqlServer -and $SQL_Result) {

@@ -1,4 +1,42 @@
-﻿Param (
+﻿<#
+.SYNOPSIS
+Gets the price of an Azure VM or disk by querying the Azure price API
+
+.DESCRIPTION
+Queries the Azure price API for a VM or disk type.
+For a VM, the reservation period and/or the use of Azure Hybrid Benefits can be specified
+For disks, the redundancy type can be specified.
+
+.PARAMETER VMType
+Type of the VM for which the price is sought. The resource type must be written exactly as in the price table, including proper capitalization.
+Some types contain spaces, these can by replaced by an underscore, e.g. use "D4s v4" or "D4s_v5" gives the same result.
+
+.PARAMETER Reservation
+Give price for pay as you go, 1 or 3 years reservation.
+If specified, must be 0, 1, or 3. If omitted, price for all three scenarios are given, separated by semicolons.
+
+.PARAMETER AHB
+Give price using Azure Hybrid Benefits, i.e. without Windows license price
+
+.PARAMETER DiskType
+Type of the disk for which the price is sought. The resource type must be written exactly as in the price table, including proper capitalization, e.g. "E10".
+
+.PARAMETER Redundancy
+Either LRS (local redundant storage) or ZRS (zone redundant storage). Default is LRS.
+.PARAMETER Currency
+Display price in the given currency, default is EUR.
+
+.EXAMPLE
+Get-AzurePrice -VMType D4ds_v5 -Reservation 3 -AHB
+Displays the price for a D4ds v5 VM with a three-year reservation and use of Azue Hybrid Benefits
+
+.EXAMPLE    
+Get-AzurePrice -DiskType S30
+Displays the price of an S30 disk with local redundant storage
+
+#>
+
+Param (
     [Parameter(ParameterSetName="VirtualMachine", Mandatory=$true)] [string] $VMType,
     [Parameter(ParameterSetName="VirtualMachine")] [int] $Reservation = -1,
     [Parameter(ParameterSetName="VirtualMachine")] [switch] $AHB,
@@ -6,33 +44,8 @@
     [Parameter(ParameterSetName="DiskStorage", Mandatory=$true)] [string] $DiskType,
     [Parameter(ParameterSetName="DiskStorage")] [string] $Redundancy = "LRS",
 
-    [string] $Currency = "EUR",
-
-    [Parameter(ParameterSetName="help", Mandatory=$true)] [Alias("h")] [switch] $help
+    [string] $Currency = "EUR"
 )
-
-if (($VMType.Length + $DiskType.Length -eq 0) -or ($help)) {
-    ""
-    ""
-    "usage:"
-    "Get-AzurePrice -VMType <vmtype> [-Reservation <reservation>] [-AHB] [-Currency <currency>]"
-    "Get-AzurePrice -DiskType <disktype> [-Redundancy <redundancy>]  [-Currency <currency>]"
-    ""
-    "    Get-AzurePrice -VMType [...] displays estimated monthly fee for a given VM type"
-    "    <vmtype>      must be written exactly as in the price table, including proper capitalization."
-    "                  the space may be replaced by an underscore, e.g. use ""D4s v4"" or ""D4s_v5"""
-    "    <reservation> is 0, 1, or 3 (years). If omitted, all three values will be reported, separated by semicolons"
-    "    <currency>    can be any valid three-letter currency code, default value is EUR"
-    ""
-    "    If the -AHB switch is given, prices are given without Windows license (i.e. using Azure Hybrid Benefit)"
-    ""
-    "    Get-AzurePrice -DiskType [...] displays estimated monthly fee for a given disk type"
-    "    <disktype>     must be written exactly as in the price table, including proper capitalization, e.g. ""E10"" or ""S20"""
-    "    <redundancy>   is either LRS or ZRS, default is LRS"
-    "    <currency>     can be any valid three-letter currency code, default value is EUR"
-    ""
-    exit
-}
 
 switch ($PsCmdlet.ParameterSetName) {
     "VirtualMachine" {
@@ -41,7 +54,6 @@ switch ($PsCmdlet.ParameterSetName) {
             $VMtype = $VMType -replace(' ?Linux','')
             $AHB = $true
         }
-
 
         # we use the armSkuName attribute, which uses underscores rather than spaces and always begins with "Standard_"
         $VMType = "Standard_" + $VMType.Replace(' ', '_')
@@ -91,7 +103,7 @@ switch ($PsCmdlet.ParameterSetName) {
         } else {
             $disk = $(Invoke-RestMethod $uri).Items | Where-Object {$_.type -eq 'Consumption' -and $_.productname -eq 'Premium SSD Managed Disks' -and $_.metername -eq ('' + $DiskType + ' ' + $Redundancy + ' Disk') }
         }
-        if ($disk -eq $null) {
+        if ($null -eq $disk) {
             "Disk Type ""$DiskType"" not found, please check spelling and capitalization. Only S, E, and P types are supported."
             exit
         }

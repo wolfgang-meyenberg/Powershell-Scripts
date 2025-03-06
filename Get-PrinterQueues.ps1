@@ -1,41 +1,42 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'default')]
+﻿<#
+.SYNOPSIS
+Lists printer queues on computers
+
+.DESCRIPTION
+Lists all printer queues on computers, displaying the computer and printer names, and the decription.
+More details can be listed using the -details switch
+
+.PARAMETER Filter
+Mandatory. List printers on computers matching the filter. The filter may contain wildcards.
+
+.PARAMETER details
+For printers, rather than giving just name and description, list details like type, location, comment, driver and port names and IP address.
+
+.PARAMETER ping
+Assess whether a printer is responsind to pings
+
+.PARAMETER outFile
+Write the output to a semicolon-separated CSV file
+
+.EXAMPLE
+
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $Filter,
     [Parameter(ParameterSetName="default", Position=1)] [switch] $details,
     [Parameter(ParameterSetName="default", Position=2)] [switch] $ping,
-    [Parameter(ParameterSetName="default", Position=3)] [string] $outFile,
-    [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
+    [Parameter(ParameterSetName="default", Position=3)] [string] $outFile
 )
 
-if ($help) {
-    "Purpose:"
-    "    Lists all printer queues on all computers matching the filter."
-    "    The <filter> can be a computer name but also include wildcards"
-    "    The output will be for the each printer on the matching computer(s),"
-    "    name of computer, printer, driver, and printer IP address."
-    ""
-    "Usage:"
-    "    Get-PrinterQueues -Filter <filter> [-details] [-ping] [-outFile <outfilename>]"
-    "    -computerFilter"
-    "        name(s) of computer(s) whose queues shall be displayed. Filter may contain wildcards"
-    ""
-    "    -details"
-    "        Give additional details for each printer: name of shared printer, location,"
-    "        comment, and port name"
-    ""
-    "    -ping"
-    "        will try to ping each printer and output an additional field 'IsLive'"
-    ""
-    "    -outFile"
-    "        if given, exports result into a semicolon-separated CSV file"
-    ""
-    exit
-}
-
-$computerNames = (Get-ADComputer -Filter ("Name -like '*" + $computerFilter +"*'")).Name
-if (-not $computerNames.GetType().IsArray) {
+$computerNames = (Get-ADComputer -Filter ("Name -like '$Filter'")).Name
+if ($null -ne $computerNames -and -not $computerNames.GetType().IsArray) {
     $computerNames = ,$computerNames
+} else {
+    "no computer found for this filter"
+    exit
 }
 
 if ($outFile) { Remove-Item -Path $outFile -Force -ErrorAction SilentlyContinue -WarningAction SilentlyContinue }
@@ -75,6 +76,7 @@ foreach ($computerName in $computerNames) {
                 Comment        = $printer.Comment
                 DriverName     = $printer.DriverName
                 PortName       = $portName
+                portDescription= $portDescription                
                 PrinterAddress = $printerAddress
             }
         } else {
@@ -86,7 +88,11 @@ foreach ($computerName in $computerNames) {
             }
         }
         if ($ping) {
-            $isLive = (Test-NetConnection $printerAddress -ErrorAction SilentlyContinue -WarningAction SilentlyContinue).PingSucceeded
+            if ($null -ne $printerAddress) {
+                $isLive = Test-NetConnection $printerAddress -InformationLevel Quiet -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+            } else {
+                $isLive = $false
+            }
             $result | Add-Member -MemberType NoteProperty -Name 'IsLive' -Value $isLive
         }
 

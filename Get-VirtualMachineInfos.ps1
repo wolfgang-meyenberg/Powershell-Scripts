@@ -46,39 +46,11 @@ Param (
     [Parameter(ParameterSetName="default", Position=4)] [switch] $ipAddresses,
     [Parameter(ParameterSetName="default", Position=5)] [switch] $ping,
     [Parameter(ParameterSetName="default", Position=6)] [string] $outFile = '',
-    [Parameter(ParameterSetName="default", Position=7)] [string] $separator = ';',
-    [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
+    [Parameter(ParameterSetName="default", Position=7)] [string] $separator = ';'
 )
 
-
-#######################
-# display usage help and exit
-#
-if ($help) {
-    "NAME"
-    "    Get-VirtualMachineInfos"
-    ""
-    "SYNTAX"
-    "    Get-VirtualMachineInfos -subscriptionFilter <filterexpression> [-disks [-asString] | [-aggregate]] [-ipAddresses] [-ping] [-outFile <filename> [-separator <separator>]]"
-    "    Get-VirtualMachineInfos -subscriptionFilter <filterexpression> -all [-outFile <filename>]"
-    ""
-    "    Returns a list of all subscriptions, virtual machines, their SKU, IP addresses,"
-    "    and SKUs of attached disks in subscriptions matching the filter"
-    ""
-    "    -all               includes -disks, -ipAddresses, -ping"
-    "    -disks             show OS and data disk SKUs"
-    "    -asString          shows the disks in string format"
-    "    -aggregatedString  shows the disks in an aggregated string format"
-    "    -ipAddresses       show IP address(es)"
-    "    -ping              ping VM to see whether it is live"
-    "    -outFile           if given, exports result into a CSV file"
-    "    -separator         separator for items in CSV file, default is semicolon"
-    ""
-    exit
-}
-
 ##################
-# convert a tier and size to a SKU like used in the Azure portal
+# convert a tier and size to a SKU name like used in the Azure portal
 # (e.g. standard SSD with 128 GB is an E10 disk)
 #
 function DiskSkuToSkuName ($tier, $size)
@@ -125,7 +97,6 @@ function DiskSkuToSkuName ($tier, $size)
     }
     $SkuName
 }
-
 
 # ========== BEGIN MAIN ================
 #
