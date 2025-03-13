@@ -3,11 +3,12 @@
 	collects cost and usage information for Azure resources, optionally exports them into one or more CSV files
 
 .DESCRIPTION
-	Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
-	If an output file name is given, a separate CSV file is created for each resource type, because the column count and headers are type dependent.
+    Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
+    If an output file name is given, a separate CSV file is created for each resource type, because the column count and headers are type dependent.
     NOTE:
     Some resource types are excluded by default unless being explicitly included using the -resourceTypes parameter.
     To get a list of default exclusions, call the script with the -WhatIf switch.
+    
 .PARAMETER subscriptionFilter
 	Single filter or comma-separated list of filters. All subscriptions whose name contains the filter expression will be analysed.
     To match all accessible subscriptions, "*" can be specifed.
@@ -133,22 +134,6 @@ function MatchFilter ([string] $value, [string[]]$includeFilters, [string[]]$exc
     return $false # not found in inclusion list
 }
 
-# write the values of an PSObject's members to a file akin to an export to a CSV file
-# the -force switch creates or overwrites a file, if it is missing, output will be appended
-# to an existing file
-function Write-ObjectToFile ([PSObject] $object, [string]$filePath, [string]$delimiter, [switch]$force) {
-    $lineToWrite = $(
-        foreach($object_properties in $object.PsObject.Properties) {
-            $object_properties.Value
-        }
-    ) -join $delimiter 
-    if ($force) {
-        $lineToWrite | Out-File -FilePath $filePath -Encoding ansi -Force
-    } else {
-        $lineToWrite | Out-File -FilePath $filePath -Encoding ansi -Append
-    }
-}
-
 # ################# BEGIN MAIN #################
 #
 #
@@ -196,7 +181,6 @@ if (-not $PSBoundParameters.ContainsKey('delimiter')) {
 
 # if user hasn't given a billing period, we assume the previous month
 if ($billingPeriod -eq '') {
-#    $billingPeriod = $((Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM") + '01')
     $billingPeriod = (Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM")
 }
 
@@ -211,13 +195,16 @@ foreach ($filter in $subscriptionFilter) {
         $subscriptionNames[$subscription.Name] = 0
     }
 }
+Write-Verbose "we will analyse these subscriptions: $($subscriptionNames.Keys | Join-String -Separator ',')"
 
 # determine the subscription(s) which match the subscription filter
 #this command will fail if we haven't logged on to Azure first
 try {
+    Write-Verbose "call to Get-AzSubscription..."
     $subscriptions = $(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -in $($subscriptionNames.Keys)}) | Sort-Object -Property Name
 }
 catch {
+    Write-Verbose "call to get-AzSubscription threw an exception as you are not logged on to Azure."
     if ($PSItem.Exception.Message -like '*Connect-AzAccount*') {
         throw "you are not logged on to Azure. Run Connect-AzAccount before running this script."
     } else {
@@ -261,14 +248,19 @@ $thisSubscriptionsConsumptions = @()    # all resource consumptions from all sub
 $ConsumptionData = @()                  # all resources that have generated nonzero cost. In the sequel, we ignore resources
                                         # which don't generate any cost
 $header = @{}                           # hash table (resource-names --> hash table (metric-names --> units) )
+$results = @()                          # array storing the results. We need that because at the end we will output the
+                                        # results ordered by subscription and resource name
+$headers = @()                          # collector for header(s)
 
 foreach ($subscription in $subscriptions) {
+    Write-Verbose "analyzing subscription $($subscription.Name)"
     Select-AzSubscription $subscription | Out-Null
     $countS++ # count for 1st level progress bar
     Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status " $countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'collecting data via API from subscription'
 
     #==============================================================
     # first, get consumption data for ALL resources in the current subscription
+    Write-Verbose "calling Get-AzConsumptionUsage Detail..."    
     $thisSubscriptionsConsumptions = ($(Get-AzConsumptionUsageDetail  -BillingPeriod $billingPeriod -Expand MeterDetails) | `
         Select-Object @{l='Type';e={$_.InstanceId.split('/')[-2]}}, `
         InstanceName, Product, PretaxCost, UsageQuantity, `
@@ -277,6 +269,7 @@ foreach ($subscription in $subscriptions) {
             @{l='MeterSubCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterSubCategory).MeterSubCategory }}, `
             @{l='Unit';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object Unit).Unit }} | `
         Group-Object -Property InstanceName, Product)
+    Write-Verbose "API call returned $($thisSubscriptionsConsumptions.Count) cost records"
     # accumulate usage and cost for the selected billing period and resource types
     $countU = 0 # for progress bar
     $thisSubscriptionsConsumptions | foreach-object {
@@ -302,8 +295,10 @@ foreach ($subscription in $subscriptions) {
                 Unit =  $_.Group[0].Unit
 #>
                 }
+            Write-Verbose "adding cost record: $newUsage"
             $ConsumptionData += $newUsage
             try {
+                Write-Verbose "adding meter $($newUsage.meterName) with unit $($_.Group[0].Unit) for resource type $($newUsage.ResourceType)"
                 $header[$newUsage.ResourceType] += @{$newUsage.meterName = $_.Group[0].Unit} 
             }
             catch {} # ignore error if we try to create a duplicate entry
@@ -313,6 +308,7 @@ foreach ($subscription in $subscriptions) {
     Write-Progress -Id 2 -Activity 'analyzing resource data' -Completed
 } # for all subscriptions
 Write-Progress -Id 1 -Activity 'collecting data via API from subscription' -Completed
+Write-Verbose "analyzed all subscriptions. Consolidated consumption data has $($ConsumptionData.Count) records"
 
 ##############
 # Now let's output the actual data. We need to iterate through the resources by resource typpe,
@@ -321,21 +317,23 @@ Write-Progress -Id 1 -Activity 'collecting data via API from subscription' -Comp
 # so we iterate through the grouped resources only.
 
 $allResourceTypes = ($ConsumptionData|Group-Object -Property ResourceType -NoElement).Name
+Write-Verbose "consolidating data for the resource types $allResourceTypes..."
 $countRT = 0 # for progress bar
 foreach  ($resourceType in $allResourceTypes) {
     $countRT++
     Write-Progress -Id 1 -PercentComplete $($countRT * 100 / $allResourceTypes.count) -Status "of type $resourceType ($countRT of $($allResourceTypes.count) types)" -Activity 'collecting resources'
-
     # all resources of the current type
     $resourcesOfThisType = ($ConsumptionData | Where-Object -Property ResourceType -eq -Value $ResourceType)
     # all meters for all resources of the current type
     $meterNames = $header[$resourceType].keys
-
+    Write-Verbose "there are $($resourcesOfThisType.count) resources of type $resourceType"
+    Write-Verbose "meters for resource type $resourceType are: $meterNames)"
     if ('' -ne $outFile) {
         # user wants output to a file. For each resource type, we will generate a separate file
         # because each resource type has different cost titems
         # The user gave us a file name like 'xyz.csv', and each csv file will get a special name like 'xyz-<resourcetype>.csv'
         $outFileName = (($outFile.split('.')[0..($outFile.Count-1)])[0]).ToString() + '-' + $resourceType.Split('/')[-1] + '.' + $outFile.Split('.')[-1]        # First output the header line.
+        Write-Verbose "writing header to $outFileName"        
         # The header lists optionally the usages first and then the cost
         $item = [PSCustomObject] @{
             # dummy entries for the first two members
@@ -361,13 +359,14 @@ foreach  ($resourceType in $allResourceTypes) {
             $count++
         }
         # now write the header
-        Write-ObjectToFile $item $outFileName $delimiter
+        $headers += $item
 
         # in case the -showUnits switch is given, add a second header line displaying the units
         if ($showUnits) {
             # as the metrics have different scales (1s, 10000s, etc), we want to have the units as first object
             # if you export to a CSV file, the units will form a second header line  
             # return the units as first object "$item"
+            Write-Verbose "writing units header to $outFileName"        
             $item = [PSCustomObject] @{
                 # dummy entries for the first members (=fields of the header line)
                 Subscription = ''
@@ -390,7 +389,7 @@ foreach  ($resourceType in $allResourceTypes) {
                 $count++
             }
             # now write the 2nd header line
-            Write-ObjectToFile $item $outFileName $delimiter
+            $results += $item
         } # if -showUnits
     } # if outFile given
 
@@ -401,6 +400,7 @@ foreach  ($resourceType in $allResourceTypes) {
         $countR++
         $resourceUnderReview = ($resourcesOfThisType | Where-Object -Property ResourceName -EQ -Value $resourceName)
         Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) of resource $resourceName" -Activity 'collecting resource details'
+        Write-Verbose "collect data for resource $resourceName"        
         # some properties of the resource
         $item = [PSCustomObject] @{
             Subscription = $resourceUnderReview[0].Subscription
@@ -436,10 +436,29 @@ foreach  ($resourceType in $allResourceTypes) {
         if ('' -eq $outFile) {
             $item
         } else {
-            Write-ObjectToFile $item $outFileName $delimiter
+            $results += $item
         }
     } # foreach resource name
     Write-Progress -Id 2 -Activity 'collecting resource details' -Completed
+    if ('' -ne $outFile) {
+        foreach($item in $headers) {
+            $(
+                foreach($property in $item.PsObject.Properties) {
+                    $property.Value
+                }
+            ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Force
+        }
+        foreach( $item in ($results | Sort-Object -Property Subscription, Name) ) {
+            $(
+                foreach($property in $item.PsObject.Properties) {
+                    $property.Value
+                }
+            ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Append
+        }
+    } else {
+        $headers
+        $results | Sort-Object -Property Subscription, Name    
+    }
 } # foreach resource type
 
-Write-Progress -Id 1 -Activity 'collecting resources' -Completed
+Write-Verbose "script finished"
