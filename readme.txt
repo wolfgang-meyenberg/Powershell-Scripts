@@ -1,23 +1,36 @@
 Get-ResourceCostDetails
 =======================
     
-Synopsis:
-Collect cost and usage information for Azure resources, optionally export them into one or more CSV files
+Purpose:
+Collect usage and cost data for resources of given resource type in Azure in
+given subscriptions.
+Resources which do not generate any cost or are usually not of interest as
+their cost does not depend on usage (e.g. VM disks) are skipped, but can be
+included if they are listed in the resource types.
+To see which resource types are excluded by default, call the script
+with the -WhatIf switch.
+Data is written to a set of CSV files (one file per resource type).
     
 Usage:
-Get-ResourceCostDetails  subscriptionFilter <subscription>[,<subscription>]
-    [-resourceTypes <type>[,<type>]] [-excludeTypes <type>[,<type>]]
-    [-billingPeriod <billingperiod>] [-noUnits] [-showZeroCostItems]
-    [-outFile <filename> [-delimiter <character>]] [-WhatIf]
-Description:
-Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
-If an output file name is given, a separate CSV file is created for each resource type, because the
+Get ResourceCostDetails -subscriptionFilter <subscription>[,<subscription>]
+                        -outFile <filename> [-delimiter <character>]
+                        [-resourceTypes <type>[,<type>]]
+                        [-excludeTypes <type>[,<type>]]
+                        [-billingPeriod <billingperiod>]
+                        [-totals] [-consolidate] [- showUsage] [-ShowUnits]
+                        [-WhatIf]
 
 Parameters:
     
 -subscriptionFilter  Mandatory. Single filter or comma-separated list of
                      filters. All subscriptions whose name contain the filter
                      expression will be analysed.
+-outFile             Mandatory. Write output to a set of CSV files.
+                     Since the results have a different format for each resource
+                     type, results are not written to a single CSV file, but to
+                     separate files, one for each resource type. For each file,
+                     the resource type will be inserted into the name before
+                     the final dot.
 -resourceTypes       Single filter or comma-separated list of filters. Only
                      resources with matching types will be analysed. If ‘*’ is
                      given as filter, all resource types will be evaluated,
@@ -36,15 +49,6 @@ Parameters:
 -showUnits           Display the units for usages and cost as second header
                      line. This is useful with the -usage switch, as the
                      metrics come in 1s, 10000s, or so.
--outFile             Write output to a set of CSV files. Without this parameter,
-                     results are written to standard output as objects, so
-                     piping them e.g. to Export-Csv will not give correct
-                     results, so use this parameter instead.
-                     Since the results have a different format for each resource
-                     type, results are not written to a single CSV file, but to
-                     separate files, one for each resource type. For each file,
-                     the resource type will be inserted into the name before
-                     the final dot.
 -delimiter           Separator character for the CSV file. Default is the list
                      separator for the current culture.
 -WhatIf              Don't evaluate costs but show a list of resources and
