@@ -4,59 +4,71 @@ Get-ResourceCostDetails
 Purpose:
 Collect usage and cost data for resources of given resource type in Azure in
 given subscriptions.
-Resources which do not generate any cost or are usually not of interest as
-their cost does not depend on usage (e.g. VM disks) are skipped, but can be
-included if they are listed in the resource types.
-To see which resource types are excluded by default, call the script
-with the -WhatIf switch.
 Data is written to a set of CSV files (one file per resource type).
     
 Usage:
-Get ResourceCostDetails -subscriptionFilter <subscription>[,<subscription>]
+Get-ResourceCostDetails -subscriptionFilter <subscription>[,<subscription>]
                         -outFile <filename> [-delimiter <character>]
                         [-resourceTypes <type>[,<type>]]
                         [-excludeTypes <type>[,<type>]]
                         [-billingPeriod <billingperiod>]
-                        [-totals] [-consolidate] [- showUsage] [-ShowUnits]
-                        [-WhatIf]
+                        [-totals] [-consolidate] [-consolidateOnly]
+                        [-showUsage] [-showUnits]
+
+Get-ResourceCostDetails [-subscriptionFilter <subscription>[,<subscription>]]
+                        [-resourceTypes <type>[,<type>]]
+                        [-excludeTypes <type>[,<type>]]
+                        -WhatIf
 
 Parameters:
     
--subscriptionFilter  Mandatory. Single filter or comma-separated list of
-                     filters. All subscriptions whose name contain the filter
-                     expression will be analysed.
--outFile             Mandatory. Write output to a set of CSV files.
+-subscriptionFilter  Mandatory except when -WhatIf is used. Single filter or
+                     comma-separated list of filters. All subscriptions
+                     matching the filter expression will be analysed.
+
+-outFile             Mandatory except when -WhatIf is used. Write output to a set of CSV files.
                      Since the results have a different format for each resource
                      type, results are not written to a single CSV file, but to
                      separate files, one for each resource type. For each file,
                      the resource type will be inserted into the name before
                      the final dot.
+
+-delimiter           Separator character for the CSV file. Default is the list
+                     separator for the current culture.
+
 -resourceTypes       Single filter or comma-separated list of filters. Only
                      resources with matching types will be analysed. If ‘*’ is
                      given as filter, all resource types will be evaluated,
                      except those which are excluded by default and except
                      those listed with the excludeTypes.
+
 -excludeTypes        Single resource type or comma-separated list of types,
                      evaluation of these types will be skipped. Some types will
                      be excluded by default unless specified in the
                      resourceTypes parameter. See also below.
+
 -billingPeriod       Collect cost for given billing period, format is 'yyyyMM',
                      default is the last month.
+
 -totals              Display the total cost per resource as last column,
                      i.e. the sum of all cost metrics.
+
+-consolidate         create an additional report file with a matrix of cost
+                     per subscription and resource type.
+
+-consolidateOnly     create only the report file with a matrix of cost per
+                     subscription and resource type, omitting the per-resource
+                     type files.
+
 -showUsage           Display usage information for each cost item additionally
                      to the cost.
+
 -showUnits           Display the units for usages and cost as second header
                      line. This is useful with the -usage switch, as the
                      metrics come in 1s, 10000s, or so.
--delimiter           Separator character for the CSV file. Default is the list
-                     separator for the current culture.
+
 -WhatIf              Don't evaluate costs but show a list of resources and
                      resource types which would be evaluated.
-                     Some resource types are excluded by default, they will
-                     also be displayed if you use the  help switch.
-                     To include these types, list them with the -resourceTypes
-                     parameter explicitly.
 
 
 -------------------------------------------------------------------------------
