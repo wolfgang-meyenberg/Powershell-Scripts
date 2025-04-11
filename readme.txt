@@ -13,7 +13,7 @@ Get-ResourceCostDetails -subscriptionFilter <subscription>[,<subscription>]
                         [-excludeTypes <type>[,<type>]]
                         [-billingPeriod <billingperiod>]
                         [-totals] [-consolidate] [-consolidateOnly]
-                        [-showUsage] [-showUnits]
+                        [-showUsage] [-showUnits] [-count]
 
 Get-ResourceCostDetails [-subscriptionFilter <subscription>[,<subscription>]]
                         [-resourceTypes <type>[,<type>]]
@@ -66,6 +66,8 @@ Parameters:
 -showUnits           Display the units for usages and cost as second header
                      line. This is useful with the -usage switch, as the
                      metrics come in 1s, 10000s, or so.
+-count               Create an additional file containing the count of
+                     resources by subscription and resource type
 
 -WhatIf              Don't evaluate costs but show a list of resources and
                      resource types which would be evaluated.
@@ -223,7 +225,7 @@ Get-VirtualNetworks -subscriptionFilter <filter>[,<filter>]
 -subscriptionFilter mandatory. Lists networks in subscriptions
                     matching the filter
 -outFile            writes output into semicolon-separated CSV file
--excludeSubnets     will only list VNets, not subnets
+-includeSubnets     list all subnets for each VNet
 
 -------------------------------------------------------------------------------
 

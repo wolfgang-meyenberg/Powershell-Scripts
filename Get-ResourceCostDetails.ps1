@@ -1,65 +1,61 @@
 <#
 .SYNOPSIS
-    collects cost and usage information for Azure resources, optionally exports them into one or more CSV files
+    collects cost and usage information for Azure resources and optionally export all details into one or more CSV files
 
 .DESCRIPTION
     Collects cost data and optionally usage data for the resources in the subscriptions matching the filter and resource type.
     For each resource type, a separate CSV file is created, because the column count and headers are type dependent.
     
 .PARAMETER subscriptionFilter
-	Mandatory. Single filter or comma-separated list of filters. All subscriptions whose name contains the filter expression will be analysed.
+    Mandatory. Single filter or comma-separated list of filters. All subscriptions whose name contains the filter expression will be analysed.
     To match all accessible subscriptions, "*" can be specifed.
 
 .PARAMETER outFile
-	Mandatory. Write output to a set of CSV files. Without this switch, results are written to standard output as objects.
-    Since the results have a different format for each resource type, results are not written to a single CSV file,
-    but to separate files, one for each resource type.
-    For each file, the resource type will be inserted into the name before the final dot.
+    Mandatory if the -details switch is used. Write output to a CSV file (or a set of CSV files if -details switch is used)
 
 .PARAMETER delimiter
-	Separator character for the CSV file. Default is the list separator for the current culture.
+    Separator character for the CSV file. Default is the list separator for the current culture.
 
 .PARAMETER resourceTypes
-	Single filter or comma-separated list of filters. Only resources with matching types will be analysed.
-	Only the last part of the type name needs to be given (e.g. "virtualmachines" for "Microsoft.Compute/virtualMachines").
+    Single filter or comma-separated list of filters. Only resources with matching types will be analysed.
+    Only the last part of the type name needs to be given (e.g. "virtualmachines" for "Microsoft.Compute/virtualMachines").
     To match all types, parameter can be omitted or "*" can be used.
 
 .PARAMETER excludeTypes
-	Comma-separated list of resource types, evaluation of these types will be skipped.
+    Comma-separated list of resource types, evaluation of these types will be skipped.
 
 .PARAMETER billingPeriod
-	Collect cost for given billing period, format is "yyyyMM", default is the last month.
+    Collect cost for given billing period, format is "yyyyMM", default is the last month.
 
-.PARAMETER totals
-    Display the total cost per resource as last column, i.e. the sum of all cost metrics.
-
-.PARAMETER consolidate
-    Create an additional report with a matrix of subscriptions, resources, and cost
-
-.PARAMETER consolidateOnly
-    Create ONLY the report with a matrix of subscriptions, resources, and cost, will not create per-resource type files.")]
+.PARAMETER details
+    Creates CSV files for each resource type with detailed cost and optionally usage information.
+    Since the detailed results have a different format for each resource type, results are not written to a single CSV file,
+    but to separate files, one for each resource type. For these files, the resource type will be inserted into the name before the final dot.
+    Requires -outFile
 
 .PARAMETER showUsage
-	Display usage information for each cost item additionally to the cost.
+    Display usage information for each cost item additionally to the cost.
+    Requires -details.
 
 .PARAMETER showUnits
     Display the units for usages and cost as second header line.
     This is useful with the -usage switch, as the metrics come in 1s, 10000s, or so.
+    Requires -details
+
+.PARAMETER count
+    Create an additional file displaying the resource count per subscription and type.
+    Requires -outFile
 
 .PARAMETER WhatIf
-	Don't evaluate costs but show a list of resources and resource types which would be evaluated.
-
-.EXAMPLE
-Get-ResourceCostDetails.ps1 -subscriptionFilter mySubs001,mySubs003 -resourceTypes virtualMachines,storageAccounts
-	Analyze virtual machines and storage accounts in the two given subscriptions and write result as objects to standard output
+    Don't evaluate costs but show a list of resources and resource types which would be evaluated.
 
 .EXAMPLE
 Get-ResourceCostDetails.ps1 -subscriptionFilter mySubs002 -resourceTypes *,routeTables -excludeTypes snapshots -showUsage
-	Analyze resource of all types(*) in given subscription, except snapshots.
+    Analyze resource of all types(*) in given subscription, except snapshots.
 
 .EXAMPLE
 Get-ResourceCostDetails.ps1 -subscriptionFilter * -resourceTypes virtualMachines,storageAccounts -billingPeriod 202405 -outFile result.csv
-	Analyze virtual machines and storage accounts for billing period May 2024 in all accessible subscriptions and write result to a set of CSV files.
+    Analyze virtual machines and storage accounts for billing period May 2024 in all accessible subscriptions and write result to a set of CSV files.
     For the two resource types, two separate files will be created named "result-virtualMachines.csv" and "result-storageAccounts.csv"
 #>
 
@@ -99,6 +95,9 @@ Param (
 
     [Parameter(ParameterSetName="default", HelpMessage="show the units and scale for the metrics")]
     [switch] $showUnits,
+
+    [Parameter(ParameterSetName="default", HelpMessage="Create an additional file displaying the resource count per subscription and type")]
+    [switch] $count,
 
     [Parameter(ParameterSetName="WhatIf", HelpMessage="display all subscriptions and resources that would be analysed. Also displays the resource types which are excludedd by default")]
     [switch] $WhatIf
@@ -228,6 +227,10 @@ if ($WhatIf) {
    exit
 }
 
+if ($count) {
+    $resourceCount = @{}     # 2D hash table forresource count, indexed by subscription and resource type
+}
+
 #####################################
 # OK, finally the main processing will begin
 #
@@ -339,22 +342,22 @@ foreach  ($resourceType in $allresourceTypes) {
         column2 = 'Resource Name'
         column3 = 'Resource Type'
     }
-    $count = 4
+    $columnCount = 4
     # add usage header items if user wants to see that
     if ($showUsage) {
         foreach ($meterName in $meterNames | Sort-Object) {
-            $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($meterName + " Usage")
-            $count++
+            $item | Add-Member -MemberType NoteProperty -Name "column$($columnCount)" -Value ($meterName + " Usage")
+            $columnCount++
         }
     }
     foreach ($meterName in $meterNames | Sort-Object) {
-        $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ($meterName + " Cost")
-        $count++
+        $item | Add-Member -MemberType NoteProperty -Name "column$($columnCount)" -Value ($meterName + " Cost")
+        $columnCount++
     }
     # add 'totals' column header in case user wants to see totals
     if ($totals) {
-        $item | Add-Member -MemberType NoteProperty -Name "column$($count)" -Value ("Total Cost")
-        $count++
+        $item | Add-Member -MemberType NoteProperty -Name "column$($columnCount)" -Value ("Total Cost")
+        $columnCount++
     }
     # now write the header
     Write-Verbose "adding  item to headers: $item"
@@ -385,7 +388,6 @@ foreach  ($resourceType in $allresourceTypes) {
         }
         if ($totals) {
             $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
-            $count++
         }
         # now write the 2nd header line
         $results += $item
@@ -442,6 +444,7 @@ foreach  ($resourceType in $allresourceTypes) {
         $results += $item
     } # foreach resource name
     $countR = 0 # for progress bar
+    $totalCount = $results.count # for progress bar
     if (-not $consolidateOnly) {
         # write output for this resource type to the file
         foreach($item in $headers) {
@@ -453,14 +456,18 @@ foreach  ($resourceType in $allresourceTypes) {
         }
         foreach( $item in ($results | Sort-Object -Property Subscription, Name) ) {
             $countR++
-            Write-Progress -Id 2 -PercentComplete 99 -Status "writing data to file $outfilename..." -Activity 'collecting resource details'
             Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) ($resourceName)" -Activity 'collecting resource details'
-        
+       
             $(
                 foreach($property in $item.PsObject.Properties) {
                     $property.Value
                 }
             ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Append
+        }
+    }
+    if ($count) {
+        $results | Group-Object -Property Subscription | ForEach-Object {
+            AddToOverview $resourceCount $_.Name $resourceType $_.Count
         }
     }
 } # foreach resource type
@@ -485,6 +492,16 @@ if ($consolidate -or $consolidateOnly) {
         $outline | Out-File $outFileName -Append
     }
 } # if overview
+
+if ($count) {
+    $countFileName = (($outFile.split('.')[0..($outFile.Count-1)])[0]).ToString() + '-count.' + $outFile.Split('.')[-1]        # First output the header line.
+    'Subscription','Resource Type','Count' -join $delimiter | Out-File -FilePath $countFileName -Encoding ansi -Force
+    foreach ($subscription in $resourceCount.Keys) {
+        foreach ($resourceType in ($resourceCount[$subscription]).Keys) {
+            $subscription,$resourceType,$resourceCount[$subscription][$resourceType] -join $delimiter | Out-File -FilePath $countFileName -Encoding ansi -Append
+        }
+    }
+} # if count
 
 Write-Progress -Id 1 -Activity 'collecting resources' -Completed
 Write-Verbose "script finished"

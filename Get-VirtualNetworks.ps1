@@ -1,47 +1,32 @@
 ﻿<#
 .SYNOPSIS
+Lists Azure VNets
 
 .DESCRIPTION
+Lists virtual networks in Azure subscriptions, optionally with list of subnets, netmask, and available IP addresses
 
-.PARAMETER VMType
+.PARAMETER subscriptionFilter
+Mandatory. Lists VNets range for the subscriptions matching the filter
 
-.EXAMPLE
+.PARAMETER details
+additionally lists max number of hosts, netmask, minimum and maximum available IP addresses for each network
 
+.PARAMETER includeSubnets"
+list all subnets for each VNet
+
+.PARAMETER outFile"
+if given, export result into a semicolon-separated CSV file rather than a list of objects
 #>
 
-[CmdletBinding(DefaultParameterSetName = 'default')]
+[CmdletBinding()]
 
 Param (
-    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,
-    [Parameter(ParameterSetName="default", Position=1)] [switch] $details,
-    [Parameter(ParameterSetName="default", Position=2)] [switch] $excludeSubnets,
-    [Parameter(ParameterSetName="default", Position=3)] [string] $outFile = '',
-    [Parameter(ParameterSetName="help")] [Alias("h")] [switch] $help
+    [Parameter(Mandatory, Position=0)] [string] $subscriptionFilter,
+    [switch] $details,
+    [switch] $includeSubnets,
+    [string] $outFile = ''
 )
 
-if ($help) {
-    "NAME"
-    "    Get-VirtualNetworks"
-    ""
-    "SYNTAX"
-    "    Get-VirtualNetworks -subscriptionFilter <filterexpression> [-details] [-excludeSubnets] [-outFile <filepath>]"
-    ""
-    "-subscriptionFilter"
-    "    mandatory parameter. Lists all VNets and subnet names with IP address"
-    "    range for the subscriptions matching the filter"
-    ""
-    "-details"
-    "    additionally lists max number of hosts, netmask, minimum and maximum"
-    "    available IP addresses for each network"
-    ""
-    "-excludeSubnets"
-    "    list only VNets rather than VNets including their subnets"
-    ""
-    "-outFile"
-    "    if given, exports result into a semicolon-separated CSV file"
-    ""
-    exit
-}
 
 function Int64ToIPString ([int64] $value)
 {
@@ -98,7 +83,6 @@ $result = $(
         Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status 'iterating through subscriptions' -Activity "analyzing subscription $countS of $($subscriptions.count)"
         $VNets = Get-AzVirtualNetwork
         foreach ($VNet in $VNets) {
-            $addressRanges = ''
             foreach ($addrPrefix in $VNet.AddressSpace.AddressPrefixes) {
                 # get some basic informationabout each VNet
                 $addressPrefix = $addrPrefix.Replace('{','').replace('}','')
@@ -131,7 +115,7 @@ $result = $(
                     }
                 }
             }
-            if (-not $excludeSubnets) {
+            if ($includeSubnets) {
                 foreach ($subnet in $VNet.Subnets) {
                     $addressPrefix = $subnet.AddressPrefix.Replace('{','').replace('}','')
                     $network = AddressPrefixToNet ($addressPrefix)
