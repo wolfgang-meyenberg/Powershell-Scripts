@@ -1,3 +1,141 @@
+Add-GpsToImages
+===============
+
+Purpose:
+Overlay JPG image files with text derived from GPS information in the image's
+EXIF data.
+JPG images can contain extended information (so-called EXIF data). This data
+may contain GPS information such as the geographical position where the picture
+was taken. The GPS location (latitude and longitude) can be used to look up
+the correspondig place name. Using this script, the location text can be placed
+on the image itself.
+Also, the filename can be changed to reflect date, location, or both.
+
+The lookup of GPS information is done via the free Openstreetmap API, which is
+limited to about one request per second.
+Depending on the place names, data may be given in non-Latin characters,
+e.g. 北京 instead of Beijing.
+You can use a translation file to map such names to characters and languages
+of your choice.
+
+The script can be used in three different ways:
+1) process all images immediately
+2) extract GPS information and create a text file mapping image names to GPS data.
+   This file can be edited before actually writing data into the images
+3) apply a translation file to the GPS file
+4) apply the previously created GPS file and write the data into the images
+
+As new user, be sure to check the descriptions of all parameters.
+
+Usage:
+
+To add GPS information directly to the images:
+Add-GpsToImages.ps1  source <String> -destination <String>
+[-translationFile <String>] [-textFormat <String>]
+[-maxTextPercent <Int32>] [-renameFormat <String>]
+
+To create a file with GPS information:
+Add-GpsToImages.ps1 -source <String> [-translationFile <String>]
+-gpsFile <String>
+
+To apply the data from the GPS file to the images:
+Add-GpsToImages.ps1 -destination <String> [-translationFile <String>]
+-gpsFile <String> [-textFormat <String>] [-maxTextPercent <Int32>]
+[-renameFormat <String>]
+
+To apply the translation file to the GPS file:
+Add-GpsToImages.ps1 -translationFile <String> -gpsFile <String>
+
+Parameters:
+-source             Path of the source files.
+                    If you give the destination path as well, GPS data is
+                    written directly into the images. If you give the gpsFile
+                    path, a GPS file is created. See also -gpsFile and
+                    -translationFile parameters.
+
+-destination        Path for the processed images, it MUST be different from
+                    the source folder. If the source path is given as well,
+                    GPS data is written directly into the images. If you give
+                    the gpsFile path, a GPS file is created. See also -gpsFile
+                    and -translationFile parameters.
+
+-translationFile    Place names are returned by the API in local script and
+                    language, e.g. 北京 or Roma. A text file mapping may be used
+                    to map these into your desired script and language. The
+                    file format is <originalname>;<translatedname>, e.g.
+                    北京;Beijing
+                    Roma;Rome
+
+                    If the source, gpsFile and translationFile parameters are
+                    given but no translation file exists, a new file is created
+                    containing all detected place names. If the translation
+                    file exists, it will not be changed. You may then edit this
+                    file and later apply GPS and translation files to your
+                    images.
+
+                    If only the gpsFile and translation file parameters are
+                    given, the translation file is applied to the GPS file,
+                    i.e. all workds appearing in the translation file will be
+                    replaced by their translations.
+
+-gpsFile            A text file mapping image path and name to GPS data.
+                    This file is created when the source and gpsFile parameters
+                    are specified, and its data is written into the images,
+                    when the gpsFile and destination parameters are specified.
+                    After creation, the file can be edited with any text
+                    editor. The format is:
+                    <path>;<filename>;<date>;<orientation>;<latitude>;<longitude>;<altitude>;<country>;<city>,
+                    e.g.:
+                    C:\pictures;IMG0001.JPG;2023:06:23 14:33:32;1;39.90;116.39;44.2;中国;北京
+                    C:\pictures;IMG0055.JPG;2025:01:30 12:17:28;1;41.90;12.45;133,30;Italia;Roma
+-textFormat         Specifies the format in which the GPS date will be written
+                    onto the image. The following placeholders will be replaced
+                    by the actual values, all other text will be written as
+                    specified:
+                        !file       filename of the image
+                        !date       date picture was taken in the format
+                                    YYYY-MM-DD
+                        !orien      orientation as given in EXIF data
+                        !lat        latitude in degrees, minutes, and seconds,
+                                    followed by N or S
+                        !lon        longitude in degrees, minutes, and seconds,
+                                    followed by W or E
+                        !alt        altitude in metres
+                        !country    name of country corresponding to GPS
+                                    location
+                        !place      name of village, town, city corresponding
+                                    to GPS location
+                        !monthyear  date picture was taken in the format
+                                    <monthname>-YYYY
+                        !time       time picture was taken
+
+                    Example: the default value '!place (!country) !monthyear'
+                             will result in '北京(中国) 2023-06-23' and
+                             'Roma (Italia) 2025-01-30'
+
+-maxTextPercent     Maximum width of the text in percent of the image width. If
+                    text would be longer than specified, the font size will be
+                    reduced. The default value is 75.
+
+-renameFormat       When this parameter is NOT given, the destination file name
+                    is the same as the source file name. If this parameter is
+                    given,the file name is defined by the specified place
+                    holders. Note that the resulting string must not contain
+                    characters which are forbidden in file names!
+                    Allowed placeholders are:
+                        y   year (four digits)
+                        m   month (two digits)
+                        d   day (two digits)
+                        p   placename (see above comment on forbidden characters)
+                        c   country (see above comment on forbidden characters)
+                        A four-digit counter is added to any filename thus generated.
+
+Example: the renameFormat 'y-m-' results in filenames like '2023-06-0001.jpg' and '2025-01-0001.jpg'
+
+
+-------------------------------------------------------------------------------
+
+
 Get-ResourceCostDetails
 =======================
     
