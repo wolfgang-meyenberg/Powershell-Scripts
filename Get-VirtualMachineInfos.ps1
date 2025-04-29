@@ -38,7 +38,7 @@ Lists all VMs in the subscription ‘mySubs’ and writed them to a colon-separa
 [CmdletBinding(DefaultParameterSetName = 'default')]
 
 Param (
-    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string] $subscriptionFilter,
+    [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string[]] $subscriptionFilter,
     [Parameter(ParameterSetName="default")] [switch] $all,
     [Parameter(ParameterSetName="default", Position=1)] [switch] $disks,
     [Parameter(ParameterSetName="default", Position=2)] [switch] $asString,
@@ -119,14 +119,23 @@ if ($asString -and $aggregatedString) {
     exit
 }
 
-# always use wildcards for subscriptions
-if ($subscriptionFilter -ne '*') {
-    $subscriptionFilter = "*$subscriptionFilter*"
+$subscriptionNames = @{}
+foreach ($filter in $subscriptionFilter) {
+    if (-not $filter.Contains('*')) {
+        $filter = '*' + $filter + '*'
+    }
+    foreach ($subscription in $(Get-AzSubscription | Where-Object {$_.Name -like "$filter" -and $_.State -eq 'Enabled'})) {
+        $subscriptionNames[$subscription.Name] = 0
+    }
 }
 
+
 try {
-    $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -like $subscriptionFilter} | Sort-Object -Property Name
+    # determine the subscription(s) which match the subscription filter
+    #this command throw an exception if we haven't logged on to Azure first
+    $subscriptions = $(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -in $($subscriptionNames.Keys)}) | Sort-Object -Property Name
 }
+
 catch {
     if ($PSItem.Exception.Message -like '*Connect-AzAccount*') {
         throw "you are not logged on to Azure. Run Connect-AzAccount before running this script."
@@ -154,7 +163,7 @@ $result = $(
         $countVM = 0
         foreach ($VM in $VMs) {
             # we want a concise output, so delete the 'Standard_' part from the SKU
-            $VmSku = ($vm | select -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
+            $VmSku = ($vm | Select-Object -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
             # create a PSCustomObject
             # if we need to report more details (see 'if' statements below), then the object will be extended as necessary
             $item = [PSCustomObject] @{

@@ -6,7 +6,7 @@ Lists Azure VNets
 Lists virtual networks in Azure subscriptions, optionally with list of subnets, netmask, and available IP addresses
 
 .PARAMETER subscriptionFilter
-Mandatory. Lists VNets range for the subscriptions matching the filter
+Mandatory. Lists VNets range for the subscriptions matching the filter, may be a list of comma-separated values
 
 .PARAMETER details
 additionally lists max number of hosts, netmask, minimum and maximum available IP addresses for each network
@@ -16,18 +16,22 @@ list all subnets for each VNet
 
 .PARAMETER outFile"
 if given, export result into a semicolon-separated CSV file rather than a list of objects
+.PARAMETER delimiter	<separator>
+Separator character for the CSV file. Default is the list separator for the current culture.
+Requires the -outFile parameter. 
+
 #>
 
-[CmdletBinding()]
-
+[CmdletBinding(DefaultParameterSetName = 'default')]
 Param (
-    [Parameter(Mandatory, Position=0)] [string] $subscriptionFilter,
+    [Parameter(Mandatory, Position=0)] [string[]] $subscriptionFilter,
     [switch] $details,
     [switch] $includeSubnets,
-    [string] $outFile = ''
+    [Parameter(Mandatory, ParameterSetName="outfile")] [string] $outFile = '',
+    [Parameter(ParameterSetName="outfile")] [string] $delimiter = ';'
 )
 
-
+# convert a binary (=64 bit integer) IP address to a string of four dot-separated octets
 function Int64ToIPString ([int64] $value)
 {
     $ret = ''
@@ -38,6 +42,7 @@ function Int64ToIPString ([int64] $value)
     $ret
 }
 
+# convert an IP address given as a dot-separated string of for octets to a binary (int64) value
 function IPStringToInt64 ([string] $ipString) {
     $ret = [int64] 0
     $addr = $ipString.Split('.')
@@ -47,31 +52,41 @@ function IPStringToInt64 ([string] $ipString) {
     $ret
 }
 
+#the Azure API gives us a network in the format {a.b.c.d/mask}, and we just want the mask
 function AddressPrefixToPrefix ([string] $prefix)
 {
     $($prefix.Replace('{','').replace('}','') -split '/')[1]
 }
-
-function AddressPrefixToMask ([Int32] $prefix)
-{
-    [Int64]0xFFFFFFFF -shl (32 - $prefix) -band 0xFFFFFFFF
-}
-
+#the Azure API gives us a network in the format {a.b.c.d/mask}, and we just want the part a.b.c.d
 function AddressPrefixToNet ($prefix)
 {
     $($prefix.Replace('{','').replace('}','') -split '/')[0]
+}
+
+# network prefix is given as an integer (e.g. 28), and we want the binary mask (e.g. 0xFFFFFF00)
+function AddressPrefixToMask ([Int32] $prefix)
+{
+    [Int64]0xFFFFFFFF -shl (32 - $prefix) -band 0xFFFFFFFF
 }
 
 # ========== BEGIN MAIN ================
 #
 #
 
-if ($subscriptionFilter -ne '*') {
-    $subscriptionFilter = "*$subscriptionFilter*"
+# set default for CSV field separator if needed
+if (-not $PSBoundParameters.ContainsKey('delimiter')) {
+    $delimiter = (Get-Culture).textinfo.ListSeparator
 }
 
-$subscriptions = Get-AzSubscription | Where-Object {$_.Name -like $subscriptionFilter}
-
+# user may have given more than one filter
+# we collect all subscription names matching any of the filter expressions
+$subscriptionNames = @{}
+foreach ($filter in $subscriptionFilter) {
+    foreach ($subscription in $(Get-AzSubscription | Where-Object {$_.Name -like "*$filter*" -and $_.State -eq 'Enabled'})) {
+        $subscriptionNames[$subscription.Name] = 0
+    }
+}
+$subscriptions = $(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Where-Object {$_.Name -in $($subscriptionNames.Keys)}) | Sort-Object -Property Name
 $countS = 0 # used for progress bar
 
 # the result for each subscription and VNet is returned as a PSCustomObject
@@ -80,7 +95,7 @@ $result = $(
     foreach ($subscription in $subscriptions) {
         Select-AzSubscription $subscription | Out-Null
         $countS++
-        Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status 'iterating through subscriptions' -Activity "analyzing subscription $countS of $($subscriptions.count)"
+        Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "analyzing $countS of $($subscriptions.count) ($($subscription.name))" -Activity 'iterating subscriptions'
         $VNets = Get-AzVirtualNetwork
         foreach ($VNet in $VNets) {
             foreach ($addrPrefix in $VNet.AddressSpace.AddressPrefixes) {
@@ -151,11 +166,11 @@ $result = $(
             }
         }
     }
-    Write-Progress -Id 1 -Activity "analyzing subscription" -Completed
+    Write-Progress -Id 1 -Activity 'iterating subscriptions' -Completed
 ) | Sort-Object -Property Subscription, VNet, Subnet
 
 if ($outFile) {
-    $result | Export-Csv -Delimiter ";" -Path $outFile -NoTypeInformation
+    $result | Export-Csv -Delimiter $delimiter -Path $outFile -NoTypeInformation
 } else {
     $result
 }
