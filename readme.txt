@@ -18,7 +18,7 @@ e.g. 北京 instead of Beijing.
 You can use a translation file to map such names to characters and languages
 of your choice.
 
-The script can be used in three different ways:
+The script can be used in different ways:
 1) process all images immediately
 2) extract GPS information and create a text file mapping image names to GPS data.
    This file can be edited before actually writing data into the images
