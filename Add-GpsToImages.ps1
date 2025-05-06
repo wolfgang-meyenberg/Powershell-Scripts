@@ -40,11 +40,10 @@ A text file mapping may be used to map these into your desired script and langua
 The file format is <originalname>;<translatedname>, e.g.
 北京;Beijing
 Roma;Rome
-If the source, gpsFile and translationFile parameters are given but no translation file exists, a new file is created containing all detected place names. If the translation file exists, it will not be changed.
+If the source, gpsFile and translationFile parameters are given but no translation file exists, a new file is created containing all detected place names.
+If the translation file exists, new lines will be added for names that are not yet contained in the file.
 You may then edit this file and later apply GPS and translation files to your images.
-
 If only the gpsFile and translation file parameters are given, the translation file is applied to the GPS file, i.e. all workds appearing in the translation file will be replaced by their translations.
-
 
 .PARAMETER gpsFile
 A text file mapping image path and name to GPS data.
@@ -168,8 +167,8 @@ class GpsData {
     }
         #   Ctor splitting a string into data fields 
         #   A string read from a GPS file has the following format:
-        #   path;filename;date;orientation;latitude;longitude;altitude;country;place
-        #     0     1       2     3         4         5         6       7        8
+        #   path;filename;date;orientation;latitude;longitude;altitude;country;place;height;width
+        #     0     1       2     3         4         5         6       7        8      9    10
         GpsData([string] $dataString) {
         $data = $dataString -split ';'
         $dateValue      = $data[2]
@@ -183,6 +182,10 @@ class GpsData {
         $this.monthYear = $dt.ToString('MMMM yyyy')   
         $this.time      = $dt.ToShortTimeString()
         $this.orientation = [int]::Parse($data[3])
+<# height and width written into file but ignored for reading
+        $this.height      = $data[9]
+        $this.width       = $data[10]
+#>
     }
 }
 
@@ -198,6 +201,8 @@ class ExifDataSet {
     [string] $monthYear
     [string] $time
     [int]    $orientation
+    [int]    $height
+    [int]    $width
     [bool]   $isValid
 
     # initializer setting object to a defined state in case no EXIF data was found
@@ -212,6 +217,8 @@ class ExifDataSet {
         $this.monthYear   = ''
         $this.time        = ''
         $this.orientation = 0
+        $this.height      = 0
+        $this.width       = 0
         $this.isValid     = $false
 
     }
@@ -267,31 +274,58 @@ class ExifDataSet {
 
 # if a translation file exists, load it into a hash table
 function LoadTranslationFile ([string] $translationFile) {
-    if (-not (Test-Path $translationFile)) {
-        return
-    }
-    foreach ($line in Get-Content -Path $translationFile) {
-        if ('' -ne $line ) {
-            try {
-                $orig, $trans = $line -split ';'
-                $script:translation[$orig] = $trans
-            }
-            catch {
-                throw "error in translation file '$translationFile'. Line '$line' must be in format original;translation, e.g. '中国;China'."
+    if (Test-Path $translationFile) {
+        foreach ($line in Get-Content -Path $translationFile) {
+            if ('' -ne $line -and $line[0] -ne '#') {
+                try {
+                    $orig, $trans = $line -split ';'
+                    $script:translation[$orig] = $trans
+                }
+                catch {
+                    throw "error in translation file '$translationFile'. Line '$line' must be in format original;translation, e.g. '中国;China'."
+                }
             }
         }
+    } else {
+        $translation = @{}
     }
 }
+
+function SaveTranslationFile ([string] $translationFile) {
+    # write the original entries first, sorted alphabetically
+    # the second <placename> may then be edited by the user
+    '#GPS name;translated name' | Out-File $translationFile -Force
+    foreach ($original in ($translation.Keys | Sort-Object)) {
+        if ($translation[$original] -ne '«new»') {
+            "$original;$($translation[$original])" | Out-File $translationFile -Append
+        }
+    }
+    # now write the new entries in the format <placename>;<placename>
+    # the second <placename> may then be edited by the user
+    "#new entries created $(Get-Date)" | Out-File $translationFile -Append
+    foreach ($original in ($translation.Keys | Sort-Object)) {
+        if ($translation[$original] -eq '«new»') {
+            "$original;$original" | Out-File $translationFile -Append
+        }
+    }
+}    
 
 # translate a string according to the translation table
 # parameters:
 #   text    the text to be translated
 # returns translated text, or unchanged text if there is no entry for it
+# if there is no entry in the translation table, create one
 function CheckTranslate ([string] $text) {
+    if ($text -eq '') {return}
+    # check whether entry exists, is not a new entry
     $transText = $script:translation[$text];
-    if ($null -ne $transText) {
+    if ($null -ne $transText -and $transText -ne '«new»') {
         return $transText
     } else {
+        # add entry if not already result of a translation
+        if ($translation.Values -notcontains $text) {
+            $translation[$text] = '«new»'
+        }
         return $text
     }
 }
@@ -511,6 +545,8 @@ function Get-ExifData ([string] $imagePath) {
                 monthYear   = $dt.ToString('MMMM yyyy')
                 time        = $dt.ToShortTimeString()
                 orientation = $orientation
+                height      = $image.height
+                width       = $image.width
                 isValid     = $true
             }
         }
@@ -534,15 +570,9 @@ function Get-ExifData ([string] $imagePath) {
 # returns nothing, but writes a text file, and optionally a translation file
 function CreateGpsFile ([string] $sourcePath, [string[]] $inputFiles, [string] $gpsFile, [string] $translationFile) {
     $count = 0 # for progress bar
-    # write the header
-    '#path;filename;date;orientation;latitude;longitude;altitude;country;place' | Out-File $gpsFile -Force
-
-    # check whether we should also create a translation file
-    $createTranslationFile = ($translationFile -ne '' -and -not (Test-Path $translationFile))
-    if ($createTranslationFile) {
-        Write-Verbose "translation file is speficied but does not exist, creating $translationFile"
-        $translation = @{}
-    }
+    # write the header for the GPS file
+    '#path;filename;date;orientation;latitude;longitude;altitude;country;place;pxheight;pxwidth' | Out-File $gpsFile -Force
+    LoadTranslationFile $translationFile
     # iterate through all source pictures
     foreach ($imageFileName in $inputFiles) {
         $count++
@@ -551,29 +581,14 @@ function CreateGpsFile ([string] $sourcePath, [string[]] $inputFiles, [string] $
         if ($exifData.isValid) {
             Write-Verbose "Creating GPS file entry for $imageFileName"
             # write entry into text file, the file contains the following fields:
-            #   folder;filename;date;orientation;latitude;longitude;altitude;country;place
-            #       0       1       2     3         4         5         6       7        8
-            $sourcePath,$imageFileName,$exifData.date,$exifData.orientation,$exifData.lat,$exifData.lon,$exifData.alt,$exifData.country,$exifData.place -join ";" | Out-File $gpsFile -Append
-            if ($createTranslationFile) {
-                # record exactly one entry for each place name in a hashtable
-                if (($exifData.country -ne '') -and ($translation.Keys -notcontains $exifData.country)) {
-                    $translation[$exifData.country] = $exifData.country
-                }
-                if (($exifData.place -ne '') -and ($translation.Keys -notcontains $exifData.place)) {
-                    $translation[$exifData.place] = $exifData.place
-                }
-            }
+            #   folder;filename;date;orientation;latitude;longitude;altitude;country;place;imageheight;imagewidth
+            #       0       1       2     3         4         5         6       7        8     9         10
+            $sourcePath,$imageFileName,$exifData.date,$exifData.orientation,$exifData.lat,$exifData.lon,$exifData.alt,$exifData.country,$exifData.place,$exifData.height,$exifData.width -join ";" | Out-File $gpsFile -Append
         } else {
             Write-Warning -message "$imageFileName - no EXIF data"             
         }
     }
-    if ($createTranslationFile) {
-        foreach ($entry in ($translation.Keys | Sort-Object)) {
-            # write lines in the format <placename>;<placename> into the translation file.
-            # the second <placename> may then be edited by the user
-            "$entry;$entry" | Out-File $translationFile -Append
-        } 
-    }
+    SaveTranslationFile $translationFile
     Write-Progress -Id 1 -Activity 'getting EXIF data' -Completed
 }
 
