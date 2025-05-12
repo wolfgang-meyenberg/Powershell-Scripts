@@ -99,10 +99,9 @@ Add-GpsToImages -source c:\source\*.jpg -gpsFile c:\source\gps.txt -translationF
 Now, edit the translation.txt file, e.g. changing an entry like "北京;北京" to "北京;Beijing" or "Roma;Roma" to "Roma;Rome"
 
 Finally, call script again to apply GPS and translation files to the pictures.
-The picture annotations have the format "placename (country), monthname year", e.g. "Rome (Italy), January 2025", and they shall not occupy more than 60% of the picture's width.
+We want the picture annotations to have the format "placename (country), monthname year", e.g. "Rome (Italy), January 2025", and they shall not occupy more than 60% of the picture's width.
 Furthermore, we want the images to be named like <country>-<year><month>-####.jpg, #### being a counter
 Add-GpsToImages -gpsFile c:\source\gps.txt -translationFile c:\source\translate.txt -destination c:\destination -textFormat '!place (!country), !monthyear -maxTextPercent 60 -renameFormat 'c-m-'
-
 #>
 
 [CmdletBinding()]
@@ -585,7 +584,7 @@ function CreateGpsFile ([string] $sourcePath, [string[]] $inputFiles, [string] $
             #       0       1       2     3         4         5         6       7        8     9         10
             $sourcePath,$imageFileName,$exifData.date,$exifData.orientation,$exifData.lat,$exifData.lon,$exifData.alt,$exifData.country,$exifData.place,$exifData.height,$exifData.width -join ";" | Out-File $gpsFile -Append
         } else {
-            Write-Warning -message "$imageFileName - no EXIF data"             
+            Write-Warning -message "$imageFileName - no geolocation data"
         }
     }
     SaveTranslationFile $translationFile
@@ -633,7 +632,7 @@ function ApplyGpsFile ([string] $gpsFilePath, [string] $destinationFolder, [stri
                 Write-Verbose "applying GPS file entry: $line"
                 AddExifDataToImage $folder $filename $exifData $destinationFolder $textFormat $maxTextPercent
             } else {
-                Write-Warning -message "$imageFileName - no EXIF data" 
+                Write-Warning -message "$imageFileName - no geolocation data in GPS file"
             }
         } # if line not empty
     }
