@@ -343,6 +343,11 @@ foreach  ($resourceType in $allresourceTypes) {
         column3 = 'Resource Type'
     }
     $columnCount = 4
+    # add 'totals' column header in case user wants to see totals
+    if ($totals) {
+        $item | Add-Member -MemberType NoteProperty -Name "column$($columnCount)" -Value ("Total Cost")
+        $columnCount++
+    }
     # add usage header items if user wants to see that
     if ($showUsage) {
         foreach ($meterName in $meterNames | Sort-Object) {
@@ -352,11 +357,6 @@ foreach  ($resourceType in $allresourceTypes) {
     }
     foreach ($meterName in $meterNames | Sort-Object) {
         $item | Add-Member -MemberType NoteProperty -Name "column$($columnCount)" -Value ($meterName + " Cost")
-        $columnCount++
-    }
-    # add 'totals' column header in case user wants to see totals
-    if ($totals) {
-        $item | Add-Member -MemberType NoteProperty -Name "column$($columnCount)" -Value ("Total Cost")
         $columnCount++
     }
     # now write the header
@@ -375,7 +375,10 @@ foreach  ($resourceType in $allresourceTypes) {
             Name         = ''
             resourceType = 'units'
         }
-        # add the header items for the usage metrics
+        if ($totals) {
+            $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
+        }
+        # add the header items for the usage metrics, if we want to see that
         if ($showUsage) {
             foreach ($meterName in $meterNames) {
                 $unit = $header[$resourceType][$meterName]
@@ -385,9 +388,6 @@ foreach  ($resourceType in $allresourceTypes) {
         # add the current currency symbol as cost metric
         foreach ($meterName in $meterNames) {
             $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
-        }
-        if ($totals) {
-            $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value $((Get-Culture).NumberFormat.CurrencySymbol)
         }
         # now write the 2nd header line
         $results += $item
@@ -407,6 +407,10 @@ foreach  ($resourceType in $allresourceTypes) {
             Subscription = $resourceUnderReview[0].Subscription
             Name         = $resourceName
             resourceType = $resourceType
+        }
+        if ($totals) {
+            # prepare 'totals' property
+            $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value 0
         }
         # add data for all meters which were discovered (some resources may not have data for all meters present)
         # In that case, use 0 if some meter is not present for the current resource
@@ -435,7 +439,7 @@ foreach  ($resourceType in $allresourceTypes) {
         Write-Verbose "collecting data for $totalCount resources of type $resourceType finished."
         if ($totals) {
             # add data for 'totals' column
-            $item | Add-Member -MemberType NoteProperty -Name $('Total Cost') -Value $totalResourceCost
+            $item."Total Cost" = $totalResourceCost
         }
         if ($consolidate -or $consolidateOnly) {
             AddToOverview $consolidatedData $item.Subscription $item.resourceType $totalResourceCost
