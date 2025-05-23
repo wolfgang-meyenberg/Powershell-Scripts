@@ -40,13 +40,13 @@ Lists all VMs in the subscription ‘mySubs’ and writed them to a colon-separa
 Param (
     [Parameter(ParameterSetName="default", Mandatory, Position=0)] [string[]] $subscriptionFilter,
     [Parameter(ParameterSetName="default")] [switch] $all,
-    [Parameter(ParameterSetName="default", Position=1)] [switch] $disks,
-    [Parameter(ParameterSetName="default", Position=2)] [switch] $asString,
-    [Parameter(ParameterSetName="default", Position=3)] [switch] $aggregatedString,
-    [Parameter(ParameterSetName="default", Position=4)] [switch] $ipAddresses,
-    [Parameter(ParameterSetName="default", Position=5)] [switch] $ping,
-    [Parameter(ParameterSetName="default", Position=6)] [string] $outFile = '',
-    [Parameter(ParameterSetName="default", Position=7)] [string] $separator = ';'
+    [Parameter(ParameterSetName="default")] [switch] $disks,
+    [Parameter(ParameterSetName="default")] [switch] $asString,
+    [Parameter(ParameterSetName="default")] [switch] $aggregatedString,
+    [Parameter(ParameterSetName="default")] [switch] $ipAddresses,
+    [Parameter(ParameterSetName="default")] [switch] $ping,
+    [Parameter(ParameterSetName="default")] [string] $outFile = '',
+    [Parameter(ParameterSetName="default")] [string] $separator = ';'
 )
 
 ##################
@@ -167,9 +167,12 @@ $result = $(
             # create a PSCustomObject
             # if we need to report more details (see 'if' statements below), then the object will be extended as necessary
             $item = [PSCustomObject] @{
-                    Subscription = $($subscription.Name)
-                    Name         = $($VM.Name)
-                    Sku          = $VmSku
+                    Subscription   = $($subscription.Name)
+                    Name           = $($VM.Name)
+                    Sku            = $VmSku
+                    OsType         = $($VM.StorageProfile.OsDisk.OsType)
+                    OsVersion      = """$($VM.StorageProfile.ImageReference.Offer)"""
+                    OsExactVersion = """$($VM.StorageProfile.ImageReference.ExactVersion)"""
                 }
             if ($disks) {
                 # we also want to have details of the disks, no just about the VM
@@ -199,7 +202,7 @@ $result = $(
                     # gather diskSkus and convert into a string
                     # format will be like "E10 + E10 + E6 +..."
                     $lastSku = ''
-                    $diskString = ''
+                    $diskString = ''
                     foreach ($disk in $VmDisks) {
                         $DataDisk = Get-AzDisk -DiskName $disk.Name
                         $DiskType = $DataDisk.Sku.Name
@@ -258,7 +261,6 @@ $result = $(
                 $item | Add-Member -MemberType NoteProperty -Name 'IpAddresses' -Value $nicString
             }
             if ($ping) {
-#                $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue -ProgressAction SilentlyContinue -InformationLevel Quiet)
                 $Live = (Test-NetConnection $NicIP -ErrorAction SilentlyContinue -WarningAction SilentlyContinue -InformationLevel Quiet)
                 $item | Add-Member -MemberType NoteProperty -Name 'IsLive' -Value $Live
             }
@@ -283,7 +285,11 @@ if (-not $outFile) {
     # so we need to do some manual magic here
     $(
         # output header
-        "Subscription${separator}Name${separator}Sku${separator}OsDisk${separator}DataDisks"
+        if ($disks) {
+            "Subscription${separator}Name${separator}Sku${separator}OS${separator}OsVersion${separator}OsExactVersion${separator}OsDisk${separator}DataDisks"
+        } else {
+            "Subscription${separator}Name${separator}Sku${separator}OS${separator}OsVersion${separator}OsExactVersion"
+        }            
         foreach ($item in $result) {
             # construct one line per item in the $result array
             $line = ''
@@ -292,7 +298,7 @@ if (-not $outFile) {
                 $member = $item.$memberName
                 if ($member.GetType().IsArray) {
                     # if the property is an array (e.g. the 'DataDisks' property), iterate through its elements
-                    # and add each elöement to the $line string
+                    # and add each element to the $line string
                     foreach ($element in $member) {
                         if ($line -ne '') { $line += $separator }
                         $line += $element

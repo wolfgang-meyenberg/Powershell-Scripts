@@ -329,7 +329,7 @@ Get-NSGRules -subscriptionFilter <filter>[,<filter>] [-details | -briefDetails]
 Get-VirtualMachineInfo
 =======================
 Purpose:
-Lists the VMs, their SKU and their disks
+Lists the VMs, their SKU, OS, OS version, and their disks
 
 Usage:
 Get VirtualMachineInfos -subscriptionFilter <filter>[,<filter>]

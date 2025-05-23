@@ -163,7 +163,7 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
     catch {
         Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `
                         " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
-                        "The error was ""$($_.Exception.InnerException.Body.Message)""." )
+                        "The error was ""$($PSItem.Exception.Message)""." )
             # add dummy values. some queries may fail only for some resources, in that case, still all objects should have the same properties
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
         if ($maxThreshold -ne 0) {

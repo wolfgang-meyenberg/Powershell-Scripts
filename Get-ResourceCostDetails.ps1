@@ -123,12 +123,14 @@ Param (
 function MatchFilter ([string] $value, [string[]]$includeFilters, [string[]]$excludeFilters)
 {
     foreach ($inclusion in $includeFilters) {
-        if ( ($inclusion -ne '*') -and ($value -like "*$inclusion*") ) {
+#        if ( ($inclusion -ne '*') -and ($value -like "*$inclusion*") ) {
+        if ( ($inclusion -ne '*') -and ($value -like "*$inclusion") ) {
             return $true # this value is included
         }
     }
     foreach ($exclusion in $excludeFilters) {
-        if ( ($exclusion -eq '*') -or ($value -like "*$exclusion*") ) {
+#        if ( ($exclusion -eq '*') -or ($value -like "*$exclusion*") ) {
+        if ( ($exclusion -eq '*') -or ($value -like "*$exclusion") ) {
             return $false # this value is excluded
          }
     }
@@ -251,58 +253,63 @@ foreach ($subscription in $subscriptions) {
 
     #==============================================================
     # first, get consumption data for ALL resources in the current subscription
-    Write-Verbose "calling Get-AzConsumptionUsage Detail..."    
-    $thisSubscriptionsConsumptions = ($(Get-AzConsumptionUsageDetail -BillingPeriod $billingPeriod -Expand MeterDetails) | `
-    # we only want some data metrics for subsequent analysis.
-    Select-Object @{l='Type';e={$_.InstanceId.split('/')[-2]}}, `
-    InstanceName, Product, PretaxCost, UsageQuantity, `
-        @{l='meterName';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object meterName).meterName }}, `
-        @{l='MeterCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterCategory).MeterCategory }}, `
-        @{l='MeterSubCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterSubCategory).MeterSubCategory }}, `
-        @{l='Unit';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object Unit).Unit }} | `
-    Group-Object -Property InstanceName, Product)
-    Write-Verbose "API call returned $($thisSubscriptionsConsumptions.Count) cost records"
-    # accumulate usage and cost for the selected billing period and resource types
-    $countU = 0 # for progress bar
-    $thisSubscriptionsConsumptions | foreach-object {
-        # thisSubscriptionsConsumptions will contain multiple cost entries for each resource and metric, typically one per day,
-        # so we sum them up here
-        $cost = ($_.Group | measure-object -Property PretaxCost -Sum).Sum
-        $usage = ($_.Group | measure-object -Property UsageQuantity -Sum).Sum
-        $countU++
-        Write-Progress -Id 2 -PercentComplete $($countU * 100 / $thisSubscriptionsConsumptions.Count) -Status "collecting resource data $countU of $($thisSubscriptionsConsumptions.count) ($($_.Group[0].InstanceName))" -Activity 'analyzing resource data'
-        # collect cost for each resource. A resource typically has several cost metrics
-        if ( ($cost -ge 0.01) -and `
-             ( ($null -eq $resourceTypes) -or ( MatchFilter $_.Group[0].Type $resourceTypes $excludeTypes ) )
-           ) {
-            $newUsage = [PSCustomObject]@{
-                Subscription = $subscription.Name
-                resourceType = $_.Group[0].Type
-                Product      = $_.Group[0].Product
-                ResourceName = $_.Group[0].InstanceName
-                Cost = $Cost
-                Usage = $usage
-                Meter = $_.Group[0].meterName + " (" + $_.Group[0].MeterSubCategory + ")"
-                MeterCategory = $_.Group[0].MeterCategory
-                MeterSubCategory = $_.Group[0].MeterSubCategory
-                Unit =  $_.Group[0].Unit
+    Write-Verbose "calling Get-AzConsumptionUsage Detail..."
+    try {
+        $thisSubscriptionsConsumptions = ($(Get-AzConsumptionUsageDetail -BillingPeriod $billingPeriod -Expand MeterDetails -ErrorAction Stop )| `
+        # we only want some data metrics for subsequent analysis.
+        Select-Object @{l='Type';e={$_.InstanceId.split('/')[-2]}}, `
+        InstanceName, Product, PretaxCost, UsageQuantity, `
+            @{l='meterName';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object meterName).meterName }}, `
+            @{l='MeterCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterCategory).MeterCategory }}, `
+            @{l='MeterSubCategory';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object MeterSubCategory).MeterSubCategory }}, `
+            @{l='Unit';e={($_|Select-Object -ExpandProperty MeterDetails | Select-Object Unit).Unit }} | `
+        Group-Object -Property InstanceName, Product)
+        Write-Verbose "API call returned $($thisSubscriptionsConsumptions.Count) cost records"
+        # accumulate usage and cost for the selected billing period and resource types
+        $countU = 0 # for progress bar
+        $thisSubscriptionsConsumptions | foreach-object {
+            # thisSubscriptionsConsumptions will contain multiple cost entries for each resource and metric, typically one per day,
+            # so we sum them up here
+            $cost = ($_.Group | measure-object -Property PretaxCost -Sum).Sum
+            $usage = ($_.Group | measure-object -Property UsageQuantity -Sum).Sum
+            $countU++
+            Write-Progress -Id 2 -PercentComplete $($countU * 100 / $thisSubscriptionsConsumptions.Count) -Status "collecting resource data $countU of $($thisSubscriptionsConsumptions.count) ($($_.Group[0].InstanceName))" -Activity 'analyzing resource data'
+            # collect cost for each resource. A resource typically has several cost metrics
+            if ( ($cost -ge 0.01) -and `
+                ( ($null -eq $resourceTypes) -or ( MatchFilter $_.Group[0].Type $resourceTypes $excludeTypes ) )
+            ) {
+                $newUsage = [PSCustomObject]@{
+                    Subscription = $subscription.Name
+                    resourceType = $_.Group[0].Type
+                    Product      = $_.Group[0].Product
+                    ResourceName = $_.Group[0].InstanceName
+                    Cost = $Cost
+                    Usage = $usage
+                    Meter = $_.Group[0].meterName + " (" + $_.Group[0].MeterSubCategory + ")"
+                    MeterCategory = $_.Group[0].MeterCategory
+                    MeterSubCategory = $_.Group[0].MeterSubCategory
+                    Unit =  $_.Group[0].Unit
+                    }
+                if ($newUsage.ResourceName -eq 'MSSQLSERVER') {
+                    # with MSSQLserver (DB aaS) resources, the resource name is always given
+                    # as 'MSSQLSERVER' while the type is some GUID - we swap that so that we see MSSQLSERVER as type
+                    # and the GUID as name
+                    $newUsage.resourceName = $newUsage.ResourceType
+                    $newUsage.resourceType = 'mssqlserver'
                 }
-            if ($newUsage.ResourceName -eq 'MSSQLSERVER') {
-                # with MSSQLserver (DB aaS) resources, the resource name is always given
-                # as 'MSSQLSERVER' while the type is some GUID - we swap that so that we see MSSQLSERVER as type
-                # and the GUID as name
-                $newUsage.resourceName = $newUsage.ResourceType
-                $newUsage.resourceType = 'mssqlserver'
-            }
-            Write-Verbose "adding cost record to consumptiondata: $newUsage"
-            $ConsumptionData += $newUsage
-            try {
-                Write-Verbose "adding meter $($newUsage.Meter) with unit $($_.Group[0].Unit) for resource type $($newUsage.resourceType)"
-                $header[$newUsage.resourceType] += @{$newUsage.Meter = $_.Group[0].Unit} 
-            }
-            catch {} # ignore error if we try to create a duplicate entry
-        } #if cost -ne 0 & resource type matches filter
-    } # foreach resource consumption in this subscription
+                Write-Verbose "adding cost record to consumptiondata: $newUsage"
+                $ConsumptionData += $newUsage
+                try {
+                    Write-Verbose "adding meter $($newUsage.Meter) with unit $($_.Group[0].Unit) for resource type $($newUsage.resourceType)"
+                    $header[$newUsage.resourceType] += @{$newUsage.Meter = $_.Group[0].Unit} 
+                }
+                catch {} # ignore error if we try to create a duplicate entry
+            } #if cost -ne 0 & resource type matches filter
+        } # foreach resource consumption in this subscription
+    }
+    catch {
+        Write-Warning "ERROR getting consumption details for subscription $($subscription.Name). Error message was ""$($PSItem.Exception.Message)""."
+    }
     Write-Progress -Id 2 -Activity 'analyzing resource data' -Completed
 } # for all subscriptions
 Write-Progress -Id 1 -Activity 'collecting data via API' -Completed
