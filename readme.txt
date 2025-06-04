@@ -30,7 +30,7 @@ As new user, be sure to check the descriptions of all parameters.
 Usage:
 
 To add GPS information directly to the images:
-Add-GpsToImages.ps1  source <String> -destination <String>
+Add-GpsToImages.ps1 -source <String> -destination <String>
 [-translationFile <String>] [-textFormat <String>]
 [-maxTextPercent <Int32>] [-renameFormat <String>]
 
@@ -60,22 +60,28 @@ Parameters:
                     and -translationFile parameters.
 
 -translationFile    Place names are returned by the API in local script and
-                    language, e.g. 北京 or Roma. A text file mapping may be used
+                    language, e.g. 北京, Roma, or София. A text file mapping may be used
                     to map these into your desired script and language. The
                     file format is <originalname>;<translatedname>, e.g.
-                    北京;Beijing
-                    Roma;Rome
+                        北京;Beijing
+                        Roma;Rome
+                        София;Sofia
 
                     If the source, gpsFile and translationFile parameters are
                     given but no translation file exists, a new file is created
                     containing all detected place names. If the translation
-                    file exists, it will not be changed. You may then edit this
+                    file exists, place names that already have entries (and
+                    possibly translations) are not changed, but will be sorted
+                    alphabetically. New place names will be added to the end
+                    of the file.
+
+it will not be changed. You may then edit this
                     file and later apply GPS and translation files to your
                     images.
 
                     If only the gpsFile and translation file parameters are
                     given, the translation file is applied to the GPS file,
-                    i.e. all workds appearing in the translation file will be
+                    i.e. all words appearing in the translation file will be
                     replaced by their translations.
 
 -gpsFile            A text file mapping image path and name to GPS data.
