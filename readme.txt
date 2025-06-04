@@ -75,9 +75,8 @@ Parameters:
                     alphabetically. New place names will be added to the end
                     of the file.
 
-it will not be changed. You may then edit this
-                    file and later apply GPS and translation files to your
-                    images.
+                    You may edit this file and later apply GPS and translation
+                    files to your images.
 
                     If only the gpsFile and translation file parameters are
                     given, the translation file is applied to the GPS file,
