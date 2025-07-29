@@ -92,7 +92,7 @@ Parameters:
                     <path>;<filename>;<date>;<orientation>;<latitude>;<longitude>;<altitude>;<country>;<city>,
                     e.g.:
                     C:\pictures;IMG0001.JPG;2023:06:23 14:33:32;1;39.90;116.39;44.2;中国;北京
-                    C:\pictures;IMG0055.JPG;2025:01:30 12:17:28;1;41.90;12.45;133,30;Italia;Roma
+                    C:\pictures;IMG0055.JPG;2025:01:30 12:17:28;1;41.90;12.45;133.30;Italia;Roma
 -textFormat         Specifies the format in which the GPS date will be written
                     onto the image. The following placeholders will be replaced
                     by the actual values, all other text will be written as
@@ -114,9 +114,16 @@ Parameters:
                                     <monthname>-YYYY
                         !time       time picture was taken
 
-                    Example: the default value '!place (!country) !monthyear'
-                             will result in '北京(中国) 2023-06-23' and
-                             'Roma (Italia) 2025-01-30'
+
+                    Example: the default value 'taken at !place (!country) !monthyear' will result in file names like
+                             'taken at 北京(中国) 2023-06-23',
+                             'taken at Roma (Italia) 2025-01-30', or
+                             'taken at София (България) 2024-10-14'.
+                    (If you used a translation file as shown in the -translationFile parameter, the names would read
+                             'taken at Beijing(China) 2023-06-23'
+                             'taken at Rome (Italy) 2025-01-30', or
+                             'taken at Sofia (Bulgaria) 2024-10-14'.)
+
 
 -maxTextPercent     Maximum width of the text in percent of the image width. If
                     text would be longer than specified, the font size will be

@@ -476,9 +476,11 @@ function AddExifDataToImage ([string] $sourceImageFolder, [string] $sourceImageF
 
     if ($renameFormat -ne '') {
         $destinationImagePath = RenamedFilePath $exifData $renameFormat $destinationImagePath
+        Write-Verbose "rename file to $destinationImagePath"
     }
     try {
         # Save the modified image
+        Write-Verbose "writing file from source $sourceImagePath to $destinationImagePath"
         $bitmap.Save($destinationImagePath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
     }
     catch {
@@ -675,14 +677,17 @@ switch ($PSCmdlet.ParameterSetName) {
     'CreateGpsFile' {
         $sourcePath = Split-Path $source -Parent | Resolve-Path
         $sourceFiles = (Get-ChildItem $sourcePath -File | Select-Object -Property Name).Name | Where-Object -FilterScript {$_ -like '*.jpg' -or $_ -like '*.jpeg'}
+        Write-Verbose "Create GPS file $gpsFile from source $sourcePath, $($sourceFiles.Count) files to process"
         CreateGpsFile $sourcePath $sourceFiles $gpsFile $translationFile
         break
     }
     'ApplyTranslationToGpsFile' {
+        write-verbose "Apply translation file $translationFile to GPS file $gpsfile"
         ApplyTranslationToGpsFile $gpsFile $translationFile
         break
     }
     'ApplyGpsFile' {
+        write-verbose "Apply GPS file $gpsfile and translation file $translationFile, writing images to $destination"
         ApplyGpsFile $gpsFile $destination $textFormat $maxTextPercent
         break
     }

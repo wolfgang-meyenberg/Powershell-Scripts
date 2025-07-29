@@ -230,7 +230,7 @@ if ($WhatIf) {
 }
 
 if ($count) {
-    $resourceCount = @{}     # 2D hash table forresource count, indexed by subscription and resource type
+    $resourceCount = @{}     # 2D hash table for resource count, indexed by subscription and resource type
 }
 
 #####################################
@@ -280,7 +280,7 @@ foreach ($subscription in $subscriptions) {
             ) {
                 $newUsage = [PSCustomObject]@{
                     Subscription = $subscription.Name
-                    resourceType = $_.Group[0].Type
+                    ResourceType = $_.Group[0].Type
                     Product      = $_.Group[0].Product
                     ResourceName = $_.Group[0].InstanceName
                     Cost = $Cost
@@ -325,10 +325,10 @@ $allresourceTypes = ($ConsumptionData|Group-Object -Property resourceType -NoEle
 Write-Verbose "consolidating data for the resource types: $allresourceTypes..."
 $countRT = 0 # for progress bar
 foreach  ($resourceType in $allresourceTypes) {
-    $countRT++      # for progress bar
-    $results = @()  # array storing the results. We need that because at the end we will output the
-                    # results ordered by subscription and resource name
-    $headers = @()  # collector for header(s)
+    $countRT++            # for progress bar
+    $results = @()        # array storing the results. We need that because at the end we will output the
+                          # results ordered by subscription and resource name
+    $columnHeaders = @()  # collector for header(s)
 
     Write-Progress -Id 1 -PercentComplete $($countRT * 100 / $allresourceTypes.count) -Status "type $countRT of $($allresourceTypes.count) ($resourceType)" -Activity 'collecting resources'
     # all resources of the current type
@@ -368,7 +368,7 @@ foreach  ($resourceType in $allresourceTypes) {
     }
     # now write the header
     Write-Verbose "adding  item to headers: $item"
-    $headers += $item
+    $item.psobject.Properties | ForEach-Object { $columnHeaders += $_.Value }
 
     # in case the -showUnits switch is given, add a second header line displaying the units
     if ($showUnits) {
@@ -413,7 +413,7 @@ foreach  ($resourceType in $allresourceTypes) {
         $item = [PSCustomObject] @{
             Subscription = $resourceUnderReview[0].Subscription
             Name         = $resourceName
-            resourceType = $resourceType
+            ResourceType = $resourceType
         }
         if ($totals) {
             # prepare 'totals' property
@@ -458,20 +458,25 @@ foreach  ($resourceType in $allresourceTypes) {
     $totalCount = $results.count # for progress bar
     if (-not $consolidateOnly) {
         # write output for this resource type to the file
-        foreach($item in $headers) {
-            $(
-                foreach($property in $item.PsObject.Properties) {
-                    $property.Value
-                }
-            ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Force
-        }
+        $(
+            foreach ($colHeader in $columnHeaders) {
+                $colHeader
+            }
+        )  -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Force
+
         foreach( $item in ($results | Sort-Object -Property Subscription, Name) ) {
             $countR++
             Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) ($resourceName)" -Activity 'collecting resource details'
-       
             $(
-                foreach($property in $item.PsObject.Properties) {
-                    $property.Value
+                foreach ($propertyName in $columnHeaders) {
+                    if ($propertyName -like 'Subscription*') {
+                        $propertyName = 'Subscription'
+                    } elseif ($propertyName -eq 'Resource Name') {
+                        $propertyName = 'Name'
+                    } elseif ($propertyName -eq 'Resource Type') {
+                        $propertyName = 'ResourceType'
+                    }
+                    $item.$propertyName
                 }
             ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Append
         }
