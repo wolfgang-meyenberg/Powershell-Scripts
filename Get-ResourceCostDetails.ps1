@@ -79,7 +79,7 @@ Param (
     [string[]] $excludeTypes = @(), 
 
     [Parameter(ParameterSetName="default", HelpMessage="billing period for which data is collected, format is 'yyyymm'")]
-    [string] $billingPeriod = '',
+    [string] $billingPeriod,
 
     [Parameter(ParameterSetName="default", HelpMessage="display total cost per resource as last column")]
     [switch] $totals,
@@ -123,13 +123,11 @@ Param (
 function MatchFilter ([string] $value, [string[]]$includeFilters, [string[]]$excludeFilters)
 {
     foreach ($inclusion in $includeFilters) {
-#        if ( ($inclusion -ne '*') -and ($value -like "*$inclusion*") ) {
         if ( ($inclusion -ne '*') -and ($value -like "*$inclusion") ) {
             return $true # this value is included
         }
     }
     foreach ($exclusion in $excludeFilters) {
-#        if ( ($exclusion -eq '*') -or ($value -like "*$exclusion*") ) {
         if ( ($exclusion -eq '*') -or ($value -like "*$exclusion") ) {
             return $false # this value is excluded
          }
@@ -148,8 +146,7 @@ function AddToOverview ([hashtable]$hashTable, [string]$subscription, [string]$r
     if ($null -ne $hashTable[$subscription]) {
         Write-Verbose "adding cost to hashtable: $cost"
         $hashTable[$subscription][$resourceType] += $cost
-    } else {    # hashTable does not yet contain a key for the subscription,
-                # so create one
+    } else {    # hashTable does not yet contain a key for the subscription, so create one
         $hashTable[$subscription] = @{$resourceType = $cost}
     }
 }
@@ -167,7 +164,7 @@ if (-not $PSBoundParameters.ContainsKey('delimiter')) {
 }
 
 # if user hasn't given a billing period, we assume the previous month
-if ($billingPeriod -eq '') {
+if (-not $PSBoundParameters.ContainsKey('billingPeriod')) {    
     $billingPeriod = (Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM")
 }
 
@@ -247,9 +244,10 @@ $consolidatedData = @{}                 # 2D hash table for overview, indexed by
 
 foreach ($subscription in $subscriptions) {
     Write-Verbose "analyzing subscription $($subscription.Name)"
-    Select-AzSubscription $subscription | Out-Null
+
     $countS++ # count for 1st level progress bar
     Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "subscription $countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'collecting data via API'
+    Select-AzSubscription $subscription | Out-Null
 
     #==============================================================
     # first, get consumption data for ALL resources in the current subscription
@@ -404,11 +402,12 @@ foreach  ($resourceType in $allresourceTypes) {
     $countR = 0 # for progress bar
     $totalCount = ($resourcesOfThisType | Group-Object -Property ResourceName -NoElement).count # for progress bar
     Write-Verbose "collect data for $totalCount resources of type $resourceType"
+    Write-Progress -Id 2 -PercentComplete 0 -Status " resources" -Activity 'collecting details of'
     foreach ($resourceName in ($resourcesOfThisType | Group-Object -Property ResourceName -NoElement).Name) { 
         $countR++
         $resourceUnderReview = ($resourcesOfThisType | Where-Object -Property ResourceName -EQ -Value $resourceName)
         $totalResourceCost = 0
-        Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) ($resourceName)" -Activity 'collecting resource details'
+        Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status " $countR of $($totalCount) ($resourceName)" -Activity 'collecting details of'
         # some properties of the resource
         $item = [PSCustomObject] @{
             Subscription = $resourceUnderReview[0].Subscription
@@ -454,7 +453,7 @@ foreach  ($resourceType in $allresourceTypes) {
         Write-Verbose "adding item to results: $item"
         $results += $item
     } # foreach resource name
-    $countR = 0 # for progress bar
+    Write-Progress -Id 2 -Activity 'collecting details of' -Completed
     $totalCount = $results.count # for progress bar
     if (-not $consolidateOnly) {
         # write output for this resource type to the file
@@ -464,9 +463,11 @@ foreach  ($resourceType in $allresourceTypes) {
             }
         )  -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Force
 
+        $countR = 0 # for progress bar
+        $totalCount = $results.count
         foreach( $item in ($results | Sort-Object -Property Subscription, Name) ) {
             $countR++
-            Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) ($resourceName)" -Activity 'collecting resource details'
+            Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) records" -Activity 'analyzing results'
             $(
                 foreach ($propertyName in $columnHeaders) {
                     if ($propertyName -like 'Subscription*') {
@@ -480,6 +481,7 @@ foreach  ($resourceType in $allresourceTypes) {
                 }
             ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Append
         }
+        Write-Progress -Id 2 -Activity 'analyzing results' -Completed
     }
     if ($count) {
         $results | Group-Object -Property Subscription | ForEach-Object {
@@ -487,7 +489,7 @@ foreach  ($resourceType in $allresourceTypes) {
         }
     }
 } # foreach resource type
-Write-Progress -Id 2 -Activity 'collecting resource details' -Completed
+Write-Progress -Id 1 -Activity 'collecting resources' -Completed
 
 if ($consolidate -or $consolidateOnly) {
     $outFileName = (($outFile.split('.')[0..($outFile.Count-1)])[0]).ToString() + '-consolidated.' + $outFile.Split('.')[-1]

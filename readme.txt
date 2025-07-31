@@ -379,18 +379,18 @@ Get-VirtualNetworks -subscriptionFilter <filter>[,<filter>]
 
 -------------------------------------------------------------------------------
 
-Get-AzureResourceData
+Get-AzureResourceLoad
 =====================
 Purpose:
     Returns a list of resources of selected type(s) in selected subscription(s)
     along with some properties and metrics
 
 Usage:
-Get-AzureResourceData -subscriptionFilter <filter>[,<filter>] [-VMs] [-SqlServer]
+Get-AzureResourceLoad -subscriptionFilter <filter>[,<filter>] [-VMs] [-SqlServer]
                       [-DbAas] [-Storage] [-ResourceList [-details]
                       [-lastHours <hours>] [-billingPeriod <billingperiod>]]
                       [-outFile <filename> [-separator]]
-Get-AzureResourceData -subscriptionFilter <filterexpression> [-all] ...
+Get-AzureResourceLoad -subscriptionFilter <filterexpression> [-all] ...
 
 
 -subscriptionFilter Single filter or comma-separated list of filters.

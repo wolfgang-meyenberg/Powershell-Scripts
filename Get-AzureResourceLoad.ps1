@@ -50,8 +50,8 @@ collect resource cost for given billing period, default is the last month. The f
 if given, exports result into a CSV file
                             NOTE: separate files will be created for different resource types.
                             Two characters will be added to the file names to make them different.
-.PARAMETER separator
-separator for items in CSV file, default is semicolon
+.PARAMETER delimiter
+delimiter for items in CSV file, default is semicolon
 
 .PARAMETER WhatIf
 Just display the names of the subscriptions which would be analysed
@@ -76,13 +76,13 @@ Param (
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [switch] $details,
     [Parameter(ParameterSetName="default")]
-    [Parameter(ParameterSetName="defaultAll")] [string] $billingPeriod = '',
+    [Parameter(ParameterSetName="defaultAll")] [string] $billingPeriod,
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [Int32] $lastHours = 24,
     [Parameter(ParameterSetName="default")]
     [Parameter(ParameterSetName="defaultAll")] [string] $outFile,
     [Parameter(ParameterSetName="default")]
-    [Parameter(ParameterSetName="defaultAll")] [string] $separator = ';',
+    [Parameter(ParameterSetName="defaultAll")] [string] $delimiter,
     [switch] $WhatIf
 )
 
@@ -161,8 +161,9 @@ function AddMetrics ([ref] $psObject, [string]$resourceId, [string] $metric, [st
         }
     }
     catch {
-        Write-Warning $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `
-                        " generated an error. Possibly the metric doesn't exist for this type of resource, check name and spelling.`n" + `
+        # some resources may not have all metrics, or a metric may be specified with an incorrect name
+        Write-Debug $("collecting the metrics ""$metric"" for resource ""$($(Get-AzResource -ResourceId $resourceId).Name)""" + `
+                        " generated an error. This is probably benevolent and can be ignored, as some resources possibly don't report all metrics. You may nonetheless check name and spelling for this metric.`n" + `
                         "The error was ""$($PSItem.Exception.Message)""." )
             # add dummy values. some queries may fail only for some resources, in that case, still all objects should have the same properties
         $psObject.Value | Add-Member -MemberType NoteProperty -Name "Max$propertyName" -Value 'n/a' -WarningAction SilentlyContinue -ErrorAction SilentlyContinue
@@ -219,7 +220,12 @@ foreach ($filter in $subscriptionFilter) {
     }
 }
 
-if ($billingPeriod -eq '') {
+# set default for CSV field separator if needed
+if (-not $PSBoundParameters.ContainsKey('delimiter')) {
+    $delimiter = (Get-Culture).textinfo.ListSeparator
+}
+
+if (-not $PSBoundParameters.ContainsKey('billingPeriod')) {
     $billingPeriod = (Get-Date (Get-Date).AddMonths(-1) -Format "yyyyMM")
 }
 
@@ -312,6 +318,9 @@ foreach ($subscription in $subscriptions) {
 
 # >>>>> To add a metric to a resource, call the AddMetrics function.
 # >>>>> See there  for a detailed description of the parameters.
+# to find out which metrics are available for an individual resource, call 
+#   Get-AzMetricDefinition  -ResourceId $ResourceID | ForEach-Object { $_.Name.Value }
+
 # >>>>> The next line collects the 'Percentage CPU' metric and adds the MaxCPU and AvgCPU properties to the $item object
 # >>>>> the scale factor is one, and the '80' indicates that we also want a property (named MaxPctCPU) that shows how many
 # >>>>> minutes of the day the CPU load was higher than 80% of the day's maximal load
@@ -374,6 +383,10 @@ foreach ($subscription in $subscriptions) {
                             Status        = $SqlDatabase.Status
                             Capacity      = $SqlDatabase.Capacity
                     }
+if ($SqlDatabase.ResourceId -eq 'metadata') {
+    'BLAH'
+}
+
                     DisplayMetricProgress 1 5
                     AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'cpu_percent' 'CPUpct' ([scale]::unit)
                     DisplayMetricProgress 2 5
@@ -447,7 +460,7 @@ foreach ($subscription in $subscriptions) {
                 $allResourceCost = Get-AzConsumptionUsageDetail -BillingPeriodName $billingPeriod -ErrorAction Stop -WarningAction Stop
             }
             catch {
-                Write-Warning ("Resource cost for subscription ""$($subscription.Name)"" and billing period ""$billingPeriod"" resulted in an error.`n" + `
+                Write-Debug ("Resource cost for subscription ""$($subscription.Name)"" and billing period ""$billingPeriod"" resulted in an error.`n" + `
                               "The error was ""$($_.Exception.Message)"".")
                 $allResourceCost = $null
             }
@@ -534,25 +547,25 @@ if (-not $outFile) {
     }
 
     if ($VM -and $VM_Result) {
-        $VM_Result | Export-Csv -Path $($outFile -replace '\.', '_VM.') -Delimiter $separator -NoTypeInformation
+        $VM_Result | Export-Csv -Path $($outFile -replace '\.', '_VM.') -Delimiter $delimiter -NoTypeInformation
     }
     if ($SqlServer -and $SQL_Result) {
-        $SQL_Result | Export-Csv -Path $($outFile -replace '\.', '_SQL.') -Delimiter $separator -NoTypeInformation
+        $SQL_Result | Export-Csv -Path $($outFile -replace '\.', '_SQL.') -Delimiter $delimiter -NoTypeInformation
     }
 
     if ($DbAas -and $DBaaS_Result) {
-        $DBaaS_Result | Export-Csv -Path $($outFile -replace '\.', '_DB.') -Delimiter $separator -NoTypeInformation
+        $DBaaS_Result | Export-Csv -Path $($outFile -replace '\.', '_DB.') -Delimiter $delimiter -NoTypeInformation
     }
 
     if ($Storage -and $Storage_Result) {
-        $Storage_Result | Export-Csv -Path $($outFile -replace '\.', '_SA.') -Delimiter $separator -NoTypeInformation
+        $Storage_Result | Export-Csv -Path $($outFile -replace '\.', '_SA.') -Delimiter $delimiter -NoTypeInformation
     }
     if ($Snapshot -and $Snapshot_Result) {
-        $Snapshot_Result | Export-Csv -Path $($outFile -replace '\.', '_SS.') -Delimiter $separator -NoTypeInformation
+        $Snapshot_Result | Export-Csv -Path $($outFile -replace '\.', '_SS.') -Delimiter $delimiter -NoTypeInformation
     }
     if ($ResourceList -and $Resource_Result) {
         $Resource_Result | `
             Sort-Object -Property @{Expression="Subscription";Descending=$false},@{Expression="ResourceCount";Descending=$true} | `
-            Export-Csv -Path $($outFile -replace '\.', '_RL.') -Delimiter $separator -NoTypeInformation
+            Export-Csv -Path $($outFile -replace '\.', '_RL.') -Delimiter $delimiter -NoTypeInformation
     }
 }
