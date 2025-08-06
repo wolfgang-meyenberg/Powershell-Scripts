@@ -200,6 +200,9 @@ Parameters:
 -billingPeriod       Collect cost for given billing period, format is 'yyyyMM',
                      default is the last month.
 
+-includeZeroMetrics  show all detected metrics, including those with zero
+                     usage or cost
+
 -totals              Display the total cost per resource as last column,
                      i.e. the sum of all cost metrics.
 

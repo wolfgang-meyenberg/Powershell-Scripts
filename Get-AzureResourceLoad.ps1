@@ -279,14 +279,14 @@ $Resource_Result = @()
 foreach ($subscription in $subscriptions) {
     Select-AzSubscription $subscription | Out-Null
     $countS++ # count for 1st level progress bar
-    Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "analyzing subscription $countS of $($subscriptions.count) ($($subscription.Name))" -Activity 'iterating through subscriptions'
+    Write-Progress -Id 1 -PercentComplete $($countS * 100 / $subscriptions.count) -Status "$($subscription.Name) ($countS of $($subscriptions.count))" -Activity 'iterating through subscriptions'
     if ($VM) {
         $VM_Result += $( 
             $VMResources = @(Get-AzVM | Sort-Object -Property Name)
             $countVM = 0 # count for 2nd level progress bar
             foreach ($VMResource in $VMResources) {
                 $countVM++
-                Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMResources.count) -Status "analyzing VM $countVM of $($VMResources.count) ($($VMResource.Name))" -Activity 'analyzing VMs'
+                Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countVM * 100 / $VMResources.count) -Status "$($VMResource.Name) ($countVM of $($VMResources.count))" -Activity 'analyzing VMs'
                 # make SKU names a little shorter, so delete the 'Standard_' part from the SKU
                 $VmSku = ($VMResource | Select-Object -ExpandProperty HardwareProfile).VmSize -replace 'Standard_'
                 # we also want CPU count and RAM size
@@ -366,11 +366,14 @@ foreach ($subscription in $subscriptions) {
         } # if there are any VMs
     } # if SQL server
 
+
     if ($DbAas) {
         $DBaaS_Result += $(
             $AzSqlServers = @(Get-AzSqlServer)
+            $countVM = 0
             foreach ($AzSqlServer in $AzSqlServers) {
-                Write-Progress -Id 2 -ParentId 1 -PercentComplete 50 -Status "analyzing $($AzSqlServers.Count) Azure SQL Servers" -Activity 'Azure aaS-Databases'
+                $countVM++
+                Write-Progress -Id 2 -ParentId 1 -PercentComplete 50 -Status "$countVM of $($AzSqlServers.Count) Azure SQL Servers" -Activity 'Azure aaS-Databases'
                 $SqlDatabases = @(Get-AzSqlDatabase -ServerName $AzSqlServer.ServerName -ResourceGroupName $AzSqlServer.ResourceGroupName)
                 foreach ($SqlDatabase in $SqlDatabases) {
                     $item = [PSCustomObject] @{
@@ -379,14 +382,10 @@ foreach ($subscription in $subscriptions) {
                             DatabaseName  = $SqlDatabase.DatabaseName
                             SkuName       = $SqlDatabase.SkuName
                             Collation     = $SqlDatabase.CollationName
-                            MaxSizeGB     = $SqlDatabase.MaxSizeBytes / 1048576
+                            MaxSizeGB     = $SqlDatabase.MaxSizeBytes / [scale]::giga
                             Status        = $SqlDatabase.Status
                             Capacity      = $SqlDatabase.Capacity
                     }
-if ($SqlDatabase.ResourceId -eq 'metadata') {
-    'BLAH'
-}
-
                     DisplayMetricProgress 1 5
                     AddMetrics ([ref]$item) $SqlDatabase.ResourceId 'cpu_percent' 'CPUpct' ([scale]::unit)
                     DisplayMetricProgress 2 5
@@ -467,7 +466,7 @@ if ($SqlDatabase.ResourceId -eq 'metadata') {
             $Resource_Result += $(
                 foreach ($Resource in $Resources) {
                     $countRes++
-                    Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countRes * 100 / $Resources.count) -Status "analyzing $($Resources.Count) Resources" -Activity 'analyzing Resources'
+                    Write-Progress -Id 2 -ParentId 1 -PercentComplete $($countRes * 100 / $Resources.count) -Status "$countRes of $($Resources.Count) resources" -Activity 'collecting resource list'
                     # get resource cost for previous month
                     if ($null -ne $allResourceCost) {
                         $resourceCost = $($allResourceCost | Where-Object -Property InstanceId -EQ $Resource.ResourceId | Measure-Object -Property PretaxCost -Sum).Sum

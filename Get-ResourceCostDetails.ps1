@@ -27,6 +27,9 @@
 .PARAMETER billingPeriod
     Collect cost for given billing period, format is "yyyyMM", default is the last month.
 
+.PARAMETER includeZeroMetrics
+    show all detected metrics, including those with zero usage or cost.
+
 .PARAMETER details
     Creates CSV files for each resource type with detailed cost and optionally usage information.
     Since the detailed results have a different format for each resource type, results are not written to a single CSV file,
@@ -80,6 +83,9 @@ Param (
 
     [Parameter(ParameterSetName="default", HelpMessage="billing period for which data is collected, format is 'yyyymm'")]
     [string] $billingPeriod,
+    
+    [Parameter(ParameterSetName="default", HelpMessage="show all detected metrics, including those with zero usage or cost")]
+    [switch] $includeZeroMetrics,
 
     [Parameter(ParameterSetName="default", HelpMessage="display total cost per resource as last column")]
     [switch] $totals,
@@ -273,7 +279,7 @@ foreach ($subscription in $subscriptions) {
             $countU++
             Write-Progress -Id 2 -PercentComplete $($countU * 100 / $thisSubscriptionsConsumptions.Count) -Status "collecting resource data $countU of $($thisSubscriptionsConsumptions.count) ($($_.Group[0].InstanceName))" -Activity 'analyzing resource data'
             # collect cost for each resource. A resource typically has several cost metrics
-            if ( ($cost -ge 0.01) -and `
+            if ( ( ($cost -ge 0.01) -or $includeZeroMetrics ) -and `
                 ( ($null -eq $resourceTypes) -or ( MatchFilter $_.Group[0].Type $resourceTypes $excludeTypes ) )
             ) {
                 $newUsage = [PSCustomObject]@{
