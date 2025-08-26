@@ -374,11 +374,9 @@ foreach  ($resourceType in $allresourceTypes) {
     Write-Verbose "adding  item to headers: $item"
     $item.psobject.Properties | ForEach-Object { $columnHeaders += $_.Value }
 
-    # in case the -showUnits switch is given, add a second header line displaying the units
+    # In case the -showUnits switch is given, add a second header line displaying the units.
+    # As the metrics have different scales (1s, 10000s, etc), we may want to show the units as second header line.
     if ($showUnits) {
-        # as the metrics have different scales (1s, 10000s, etc), we want to have the units as first object
-        # if you export to a CSV file, the units will form a second header line  
-        # return the units as first object "$item"
         Write-Verbose "writing units header to $outFileName"        
         $item = [PSCustomObject] @{
             # dummy entries for the first members (=fields of the header line)
@@ -406,18 +404,18 @@ foreach  ($resourceType in $allresourceTypes) {
 
     # Now let's write the actual data for the resources of the given type
     $countR = 0 # for progress bar
-    $totalCount = ($resourcesOfThisType | Group-Object -Property ResourceName -NoElement).count # for progress bar
+    $totalCount = ($resourcesOfThisType | Group-Object -Property Subscription, ResourceName -NoElement).count # for progress bar
     Write-Verbose "collect data for $totalCount resources of type $resourceType"
     Write-Progress -Id 2 -PercentComplete 0 -Status " resources" -Activity 'collecting details of'
-    foreach ($resourceName in ($resourcesOfThisType | Group-Object -Property ResourceName -NoElement).Name) { 
+    # iterate through all resources(identified by their name)
+    foreach ($resourceUnderReview in ($resourcesOfThisType | Group-Object -Property Subscription, ResourceName)) { 
         $countR++
-        $resourceUnderReview = ($resourcesOfThisType | Where-Object -Property ResourceName -EQ -Value $resourceName)
         $totalResourceCost = 0
         Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status " $countR of $($totalCount) ($resourceName)" -Activity 'collecting details of'
         # some properties of the resource
         $item = [PSCustomObject] @{
-            Subscription = $resourceUnderReview[0].Subscription
-            Name         = $resourceName
+            Subscription = $resourceUnderReview.Group[0].Subscription
+            Name         = $resourceUnderReview.Name
             ResourceType = $resourceType
         }
         if ($totals) {
@@ -427,28 +425,26 @@ foreach  ($resourceType in $allresourceTypes) {
         # add data for all meters which were discovered (some resources may not have data for all meters present)
         # In that case, use 0 if some meter is not present for the current resource
         # first add usage data if required, then the cost data
-        if ($showUsage) {        
-                foreach ($meterName in $meterNames) {
-                $usageItem = ($resourceUnderReview | Where-Object -Property Meter -EQ -Value $meterName)
+        if ($showUsage) {
+            foreach ($meterName in $meterNames) {
+                $usage =  ($resourceUnderReview.Group | Where-Object -Property Meter -EQ -Value $meterName | Measure-Object -Property Usage -Sum).Sum
                 if ($null -ne $usageItem) {
-                    $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value $costItem.Usage
+                    $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value $usage
                 } else {
                     $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value 0
                 }
             }
         } # if showusage 
         foreach ($meterName in $meterNames) {
-            $costItem =  ($resourceUnderReview | Where-Object -Property Meter -EQ -Value $meterName)
-            if ($null -ne $costItem) {
-                $cost = ($costItem | Measure-Object -Property Cost -Sum).Sum
+            $cost =  ($resourceUnderReview.Group | Where-Object -Property Meter -EQ -Value $meterName | Measure-Object -Property Cost -Sum).Sum
+            if ($null -ne $cost) {
                 $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value $Cost
-                Write-Verbose "adding cost item to totalResourceCost: $($Cost)"
+                Write-Verbose "adding cost item to totalResourceCost for resource ($item.Name): $($Cost)"
                 $totalResourceCost += $Cost
             } else {
                 $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Cost') -Value 0
             }
         }  # for each meter name
-        Write-Verbose "collecting data for $totalCount resources of type $resourceType finished."
         if ($totals) {
             # add data for 'totals' column
             $item."Total Cost" = $totalResourceCost
@@ -463,18 +459,20 @@ foreach  ($resourceType in $allresourceTypes) {
     $totalCount = $results.count # for progress bar
     if (-not $consolidateOnly) {
         # write output for this resource type to the file
-        $(
+        $line = $(
             foreach ($colHeader in $columnHeaders) {
                 $colHeader
             }
-        )  -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Force
+        )  -join $delimiter 
+        $line | Out-File -FilePath $outfilename -Encoding ansi -Force
+        Write-Verbose "writing header >>> $line"
 
         $countR = 0 # for progress bar
         $totalCount = $results.count
         foreach( $item in ($results | Sort-Object -Property Subscription, Name) ) {
             $countR++
             Write-Progress -Id 2 -PercentComplete $($countR * 100 / $totalCount) -Status "$countR of $($totalCount) records" -Activity 'analyzing results'
-            $(
+            $line = $(
                 foreach ($propertyName in $columnHeaders) {
                     if ($propertyName -like 'Subscription*') {
                         $propertyName = 'Subscription'
@@ -483,9 +481,12 @@ foreach  ($resourceType in $allresourceTypes) {
                     } elseif ($propertyName -eq 'Resource Type') {
                         $propertyName = 'ResourceType'
                     }
+                    Write-Verbose "adding property $propertyname with value $($item.$propertyName)"
                     $item.$propertyName
                 }
-            ) -join $delimiter | Out-File -FilePath $outfilename -Encoding ansi -Append
+            ) -join $delimiter 
+            Write-Verbose "--> $line"
+            $line | Out-File -FilePath $outfilename -Encoding ansi -Append
         }
         Write-Progress -Id 2 -Activity 'analyzing results' -Completed
     }

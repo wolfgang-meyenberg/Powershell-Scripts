@@ -255,7 +255,7 @@ $result = $(
                     $nic = Get-AzNetworkInterface -ResourceId $nicId.Id
                     foreach ($ipConfiguration in $nic.IpConfigurations) {
                         if ($nicString -ne '') { $nicString += "," }
-                        $nicString += $ipConfiguration.PrivateIpAddress
+                        $nicString += '"''' + $ipConfiguration.PrivateIpAddress + '"'
                     }
                 }
                 $item | Add-Member -MemberType NoteProperty -Name 'IpAddresses' -Value $nicString
