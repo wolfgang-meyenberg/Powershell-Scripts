@@ -427,8 +427,8 @@ foreach  ($resourceType in $allresourceTypes) {
         # first add usage data if required, then the cost data
         if ($showUsage) {
             foreach ($meterName in $meterNames) {
-                $usage =  ($resourceUnderReview.Group | Where-Object -Property Meter -EQ -Value $meterName | Measure-Object -Property Usage -Sum).Sum
-                if ($null -ne $usageItem) {
+                $usage = ($resourceUnderReview.Group | Where-Object -Property Meter -EQ -Value $meterName | Measure-Object -Property Usage -Sum).Sum
+                if ($null -ne $usage) {
                     $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value $usage
                 } else {
                     $item | Add-Member -MemberType NoteProperty -Name $($meterName + ' Usage') -Value 0
