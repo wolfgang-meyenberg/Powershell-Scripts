@@ -135,14 +135,20 @@ Parameters:
                     holders. Note that the resulting string must not contain
                     characters which are forbidden in file names!
                     Allowed placeholders are:
-                        y   year (four digits)
-                        m   month (two digits)
-                        d   day (two digits)
-                        p   placename (see above comment on forbidden characters)
-                        c   country (see above comment on forbidden characters)
-                        A four-digit counter is added to any filename thus generated.
+    !year    year (four digits)
+    !yy      year (last two digits)
+    !month   month (two digits)
+    !day     day (two digits)
+    !place   placename (see above comment on forbidden characters)
+    !country country (see above comment on forbidden characters)
+    A four-digit counter is added to any filename thus generated.
 
-Example: the renameFormat 'y-m-' results in filenames like '2023-06-0001.jpg' and '2025-01-0001.jpg'
+    Example: the renameFormat '!yy-!month-' results in filenames
+             like '23-06-0001.jpg' and '25-01-0001.jpg'
+
+-recurse            walks through given folder and all subfolders.
+                    NOTE that if a destination folder is given, all images are
+                    copied into this one single destination folder!
 
 
 -------------------------------------------------------------------------------
@@ -199,9 +205,6 @@ Parameters:
 
 -billingPeriod       Collect cost for given billing period, format is 'yyyyMM',
                      default is the last month.
-
--includeZeroMetrics  show all detected metrics, including those with zero
-                     usage or cost
 
 -totals              Display the total cost per resource as last column,
                      i.e. the sum of all cost metrics.
@@ -382,18 +385,18 @@ Get-VirtualNetworks -subscriptionFilter <filter>[,<filter>]
 
 -------------------------------------------------------------------------------
 
-Get-AzureResourceLoad
+Get-AzureResourceData
 =====================
 Purpose:
     Returns a list of resources of selected type(s) in selected subscription(s)
     along with some properties and metrics
 
 Usage:
-Get-AzureResourceLoad -subscriptionFilter <filter>[,<filter>] [-VMs] [-SqlServer]
+Get-AzureResourceData -subscriptionFilter <filter>[,<filter>] [-VMs] [-SqlServer]
                       [-DbAas] [-Storage] [-ResourceList [-details]
                       [-lastHours <hours>] [-billingPeriod <billingperiod>]]
                       [-outFile <filename> [-separator]]
-Get-AzureResourceLoad -subscriptionFilter <filterexpression> [-all] ...
+Get-AzureResourceData -subscriptionFilter <filterexpression> [-all] ...
 
 
 -subscriptionFilter Single filter or comma-separated list of filters.

@@ -66,7 +66,7 @@ Specifies the format in which the GPS date will be written onto the image. The f
     !monthyear  date picture was taken in the format <monthname>-YYYY
     !time       time picture was taken
 
-Example: the default value '!place (!country) !monthyear' will result in '北京(中国) 2023-06-23' and 'Roma (Italia) 2025-01-30'
+Example: the value '!place (!country) !monthyear' will result in '北京(中国) 2023-06-23' and 'Roma (Italia) 2025-01-30'
 
 .PARAMETER maxTextPercent
 Maximum width of the text in percent of the image width. If text would be longer than specified, the font size will be reduced. The default value is 75.
@@ -75,14 +75,18 @@ Maximum width of the text in percent of the image width. If text would be longer
 When this parameter is NOT given, the destination file name is the same as the source file name.
 If this parameter is given,the file name is defined by the specified place holders. Note that the resulting string must not contain characters which are forbidden in file names!
 Allowed placeholders are:
-    y   year (four digits)
-    m   month (two digits)
-    d   day (two digits)
-    p   placename (see above comment on forbidden characters)
-    c   country (see above comment on forbidden characters)
+    !year    year (four digits)
+    !yy      year (last two digits)
+    !month   month (two digits)
+    !day     day (two digits)
+    !place   placename (see above comment on forbidden characters)
+    !country country (see above comment on forbidden characters)
     A four-digit counter is added to any filename thus generated.
 
-Example: the renameFormat 'y-m-' results in filenames like '2023-06-0001.jpg' and '2025-01-0001.jpg'
+Example: the renameFormat '!yy-!month-' results in filenames like '23-06-0001.jpg' and '25-01-0001.jpg'
+
+.PARAMETER recurse
+Process all pictures in the current directory and all its subdirectories
 
 .EXAMPLE
 Imagine we have many pictures taken over time, and some are from places which use a different script or language. We want the pictures to be annotated with place, and date, the place names should be in Latin script in English language.
@@ -101,7 +105,7 @@ Now, edit the translation.txt file, e.g. changing an entry like "北京;北京" 
 Finally, call script again to apply GPS and translation files to the pictures.
 We want the picture annotations to have the format "placename (country), monthname year", e.g. "Rome (Italy), January 2025", and they shall not occupy more than 60% of the picture's width.
 Furthermore, we want the images to be named like <country>-<year><month>-####.jpg, #### being a counter
-Add-GpsToImages -gpsFile c:\source\gps.txt -translationFile c:\source\translate.txt -destination c:\destination -textFormat '!place (!country), !monthyear -maxTextPercent 60 -renameFormat 'c-m-'
+Add-GpsToImages -gpsFile c:\source\gps.txt -translationFile c:\source\translate.txt -destination c:\destination -textFormat '!place (!country), !monthyear -maxTextPercent 60 -renameFormat '!country-!year!month-'
 #>
 
 [CmdletBinding()]
@@ -128,7 +132,7 @@ Param (
 
     [Parameter(ParameterSetName="AddGpsLocationDirect", HelpMessage="use any of the following placeholders: !file !date !orien !lat !lon !alt !country !place !monthyear !time")]
     [Parameter(ParameterSetName="ApplyGpsFile", HelpMessage="use any of the following placeholders: !file !date !orien !lat !lon !alt !country !place !monthyear !time")]
-    [string] $textFormat = '!place (!country) !monthyear',
+    [string] $textFormat = '',
 
     [Parameter(ParameterSetName="AddGpsLocationDirect", HelpMessage="max text size in % of image width")]
     [Parameter(ParameterSetName="ApplyGpsFile", HelpMessage="max text size in % of image width")]
@@ -138,48 +142,65 @@ Param (
         HelpMessage="rename file, use y,m,d,p,c as placeholders for year, month, day, place, country. Do not include characters not valid for filenames")]
     [Parameter(ParameterSetName="ApplyGpsFile", `
         HelpMessage="rename file, use y,m,d,p,c as placeholders for year, month, day, place, country. Do not include characters not valid for filenames")]
-    [string] $renameFormat
+    [string] $renameFormat,
+
+    [Parameter(ParameterSetName="CreateGpsFile", HelpMessage="also process subdirectories")]
+    [Parameter(ParameterSetName="AddGpsLocationDirect", HelpMessage="also process subdirectories")]
+    [switch] $recurse
 )
 
 # a record of the GPS data which we get as EXIF information in usable format
 class GpsData {
-    [double]    $lat
-    [double]    $lon
-    [double]    $alt
-    [string]    $country
-    [string]    $place
-    [datetime]  $date
-    [string]    $monthYear
-    [string]    $time
-    [int]       $orientation
-    GpsData([double]$lat, [double]$lon, [double]$alt, [string]$country, [string]$place, [datetime]$date, [int]$orientation) {
-        lat	= $lat
-        lon	= $lon
-        alt	= $alt
+    [double] $lat
+    [double] $lon
+    [double] $alt
+    [string] $country
+    [string] $place
+    [string] $date
+    [string] $monthYear
+    [string] $time
+    [int]    $orientation
+    GpsData([double]$lat, [double]$lon, [double]$alt, [string]$country, [string]$place, [string]$date, [int]$orientation) {
+        lat     = $lat
+        lon     = $lon
+        alt	    = $alt
         country	= $country
         place	= $place
         date	= $date
-        $dt = [datetime]::ParseExact($date, 'yyyy:MM:dd HH:mm:ss',$null)
-        monthYear   = $dt.ToString('MMMM yyyy')   
-        time        = $dt.ToShortTimeString()
         orientation	= $orientation
+        try {
+            $dt = [DateTime]::ParseExact($date, 'yyyy:MM:dd HH:mm:ss',$null)
+            monthYear   = $dt.ToString('MMMM yyyy')   
+            time        = $dt.ToShortTimeString()
+        }
+        catch {
+            date = ''
+            monthYear   = ''
+            time        = ''
+        }
     }
-        #   Ctor splitting a string into data fields 
-        #   A string read from a GPS file has the following format:
-        #   path;filename;date;orientation;latitude;longitude;altitude;country;place;height;width
-        #     0     1       2     3         4         5         6       7        8      9    10
-        GpsData([string] $dataString) {
+    #   Ctor splitting a string into data fields 
+    #   A string read from a GPS file has the following format:
+    #   path;filename;date;orientation;latitude;longitude;altitude;country;place;height;width
+    #     0     1       2     3         4         5         6       7        8      9    10
+    GpsData([string] $dataString) {
         $data = $dataString -split ';'
-        $dateValue      = $data[2]
         $this.lat	    = [double]::Parse($data[4])
         $this.lon	    = [double]::Parse($data[5])
         $this.alt	    = [double]::Parse($data[6])
         $this.country	= $data[7]
         $this.place	    = $data[8]
-        $dt = [datetime]::ParseExact($dateValue, 'yyyy:MM:dd HH:mm:ss',$null)
-        $this.date	    = $dt
-        $this.monthYear = $dt.ToString('MMMM yyyy')   
-        $this.time      = $dt.ToShortTimeString()
+        try {
+            $dt = [DateTime]::ParseExact($data[2], 'yyyy:MM:dd HH:mm:ss',$null)
+            $this.date	    = $data[2]
+            $this.monthYear = $dt.ToString('MMMM yyyy')   
+            $this.time      = $dt.ToShortTimeString()
+        }
+        catch {
+            $this.date	    = ''
+            $this.monthYear = ''
+            $this.time      = ''
+        }
         $this.orientation = [int]::Parse($data[3])
 <# height and width written into file but ignored for reading
         $this.height      = $data[9]
@@ -190,7 +211,7 @@ class GpsData {
 
 # a record of GPS data as read from a picture's EXIF record
 class ExifDataSet {
-    [string] $fileName
+    [string] $path
     [double] $lat
     [double] $lon
     [double] $alt
@@ -202,43 +223,42 @@ class ExifDataSet {
     [int]    $orientation
     [int]    $height
     [int]    $width
-    [bool]   $isValid
+    [bool]   $validLocation
 
     # initializer setting object to a defined state in case no EXIF data was found
     hidden InitError() {
-        $this.fileName    = ''
-        $this.lat         = 0
-        $this.lon         = 0
-        $this.alt         = 0
-        $this.country     = 'unknown'
-        $this.place       = 'unknown'
-        $this.date        = ''
-        $this.monthYear   = ''
-        $this.time        = ''
-        $this.orientation = 0
-        $this.height      = 0
-        $this.width       = 0
-        $this.isValid     = $false
-
+        $this.path         = ''
+        $this.lat          = 0
+        $this.lon          = 0
+        $this.alt          = 0
+        $this.country      = ''
+        $this.place        = ''
+        $this.date         = ''
+        $this.monthYear    = ''
+        $this.time         = ''
+        $this.orientation  = 0
+        $this.height       = 0
+        $this.width        = 0
+        $this.validLocation = $false
     }
     # default Ctor
     ExifDataSet () {
         $this.InitError()
     }
     # Ctor initializing object with EXIF data already given as fields
-    ExifDataSet ( [string] $fileName, [double] $lat, [double] $lon, [double] $alt, [string] $country, [string] $place, [string] $date, [string] $monthYear, [string] $time, [int] $orientation ) {
+    ExifDataSet ( [string] $path, [double] $lat, [double] $lon, [double] $alt, [string] $country, [string] $place, [string] $date, [string] $monthYear, [string] $time, [int] $orientation ) {
         try {
-            $this.fileName    = $fileName
-            $this.lat         = $lat
-            $this.lon         = $lon
-            $this.alt         = $alt
-            $this.country     = $country
-            $this.place       = $place
-            $this.date        = $date
-            $this.monthYear   = $monthYear
-            $this.time        = $time
-            $this.orientation = $orientation
-            $this.isValid     = $true
+            $this.path         = $path
+            $this.lat          = $lat
+            $this.lon          = $lon
+            $this.alt          = $alt
+            $this.country      = $country
+            $this.place        = $place
+            $this.date         = $date
+            $this.monthYear    = $monthYear
+            $this.time         = $time
+            $this.orientation  = $orientation
+            $this.validLocation = $true
         }
         catch {
             # reset object in case any conversion goes wrong,
@@ -250,18 +270,25 @@ class ExifDataSet {
     ExifDataSet ( [string] $line ) {
         try {
             $data = @($line -split ';')
-            $this.fileName    = $data[0]
-            $this.lat         = [double]::Parse($data[3])
-            $this.lon         = [double]::Parse($data[4])
-            $this.alt         = [double]::Parse($data[5])
-            $this.country     = $data[6]
-            $this.place        = $data[7]
-            $dt = [datetime]::ParseExact($data[1], 'yyyy:MM:dd HH:mm:ss',$null)
-            $this.date        = $dt.ToString('yyyy-MM-dd')
-            $this.monthYear   = $dt.ToString('MMMM yyyy')   
-            $this.time        = $dt.ToShortTimeString()
-            $this.orientation = [int]::Parse($data[2])
-            $this.isValid     = $true
+            $this.path          = $data[0]
+            $this.lat           = [double]::Parse($data[3])
+            $this.lon           = [double]::Parse($data[4])
+            $this.alt           = [double]::Parse($data[5])
+            $this.country       = $data[6]
+            $this.place         = $data[7]
+            try {
+                $this.date = $data[1] -replace '-',':' # either separator may be used
+                $dt = [DateTime]::ParseExact($this.date, 'yyyy:MM:dd HH:mm:ss',$null)
+                $this.monthYear = $dt.ToString('MMMM yyyy')
+                $this.time      = $dt.ToShortTimeString()
+            }
+            catch {
+                $this.date	    = ''
+                $this.monthYear = ''
+                $this.time      = ''
+            }
+            $this.orientation   = [int]::Parse($data[3])
+            $this.validLocation = ($this.lat -ne 0 -or $this.lon -ne 0)
         }
         catch {
             # reset object in case any conversion goes wrong,
@@ -269,12 +296,288 @@ class ExifDataSet {
             $this.InitZero
         }
     }    
+  # Ctor initializing object with only fileDateTime given
+    ExifDataSet ( [string] $path, [string] $date ) {
+        try {
+            $this.path         = $path
+            $this.lat          = 0
+            $this.lon          = 0
+            $this.alt          = 0
+            $this.country      = ''
+            $this.place        = ''
+            $this.date         = $date
+            if ('' -ne $this.date) {
+                $this.monthYear    = $date.ToString('MMMM yyyy')   
+                $this.time         = $date.ToShortTimeString()
+            } else {
+                $this.monthYear    = ''   
+                $this.time         = ''
+            }
+            $this.orientation  = 0
+            $this.validLocation = $false
+        }
+        catch {
+            # reset object in case any conversion goes wrong,
+            # because that means that the data is invalid
+            $this.InitError()
+        }
+    }
+ }
+
+# read EXIF data from a picture file
+# parameters:
+#   imagePath   path and filename of the picture to read from
+# returns EXIF data from picture. If EXIF data is not found or invalid,
+# the field validLocation will be $false
+function Get-ExifData ([string] $path) {
+    # try to load image 
+    try {
+        Write-Verbose "try to load $path"
+        $image = New-Object -ComObject Wia.ImageFile
+        $image.LoadFile($path)
+    }
+    catch {
+        Write-Warning "ERROR loading image from $path, error message was`r`n $($_.Exception.Message)"
+        return $null
+    }
+    # check whether file contains EXIF properties
+    if ($null -ne ($image.Properties | Where-Object -Property Name -eq 'DateTime').Value) {
+        try {
+            $orientation = ($image.properties | Where-Object -Property Name -eq 'Orientation').Value       
+            $GPSLat = @(($image.Properties | Where-Object -Property Name -eq 'GpsLatitude').Value)
+            $GPSLon = @(($image.Properties | Where-Object -Property Name -eq 'GpsLongitude').Value)
+            $GPSAlt = @(($image.Properties | Where-Object -Property Name -eq 'GpsAltitude').Value)
+            $dtString = @(($image.Properties | Where-Object -Property Name -eq 'DateTime').Value)
+            $lat = $GPSLat[0].Value + $GPSLat[1].Value/60 + $GPSLat[2].Value/3600
+            $lon = $GPSLon[0].Value + $GPSLon[1].Value/60 + $GPSLon[2].Value/3600
+            if (@(($image.Properties | Where-Object -Property Name -eq 'GpsLatitudeRef').Value) -eq 'S') {
+                $lat = -$lat
+            }
+            if (@(($image.Properties | Where-Object -Property Name -eq 'GpsLongitudeRef').Value) -eq 'W') {
+                $lon = -$lon
+            }
+            try {
+                $date = [DateTime]::ParseExact($dtString, 'yyyy:MM:dd HH:mm:ss',$null)
+                $dateStr   = $date.ToString('yyyy-MM-dd HH:mm:ss')
+                $monthYear = $date.ToString('MMMM yyyy')   
+                $time      = $date.ToShortTimeString()
+            }
+            catch {
+                $dateStr   = ''
+                $monthYear = ''
+                $time      = ''
+            }
+            if ($Lat -ne 0 -and $Lon -ne 0) { # EXIF data contains GPS location
+                $r=Invoke-WebRequest -uri "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&namedetails=1"
+                $locInfo = $r.RawContent -split '\r\n' | Where-Object ({$_ -like '{*'}) | ConvertFrom-Json
+                $address = ''
+                if ($null -ne $locInfo.address.city) {
+                    $address = $locInfo.address.city
+                } elseif  ($null -ne $locInfo.address.town) {
+                    $address = $locInfo.address.town
+                } elseif  ($null -ne $locInfo.address.village) {
+                    $address = $locInfo.address.village
+                } elseif  ($null -ne $locInfo.address.hamlet) {
+                    $address = $locInfo.address.hamlet
+                } elseif  ($null -ne $locInfo.address.suburb) {
+                    $address = $locInfo.address.suburb
+                } elseif  ($null -ne $locInfo.address.municipality) {
+                    $address = $locInfo.address.municipality
+                } elseif  ($null -ne $locInfo.address.road) {
+                    $address = $locInfo.address.road
+                } elseif  ($null -ne $locInfo.address.state) {
+                    $address = $locInfo.address.state
+                } else {
+                    # there is no geo information for these coordinates
+                    $address = "{0}, {1}" -f (DecimalToDegree $lat 'B'), (DecimalToDegree $lon 'L')
+                } 
+                Write-Verbose "location for lat=$lat, lon=$lon is $address"
+                return [ExifDataSet]@{
+                    path          = $path
+                    lat           = $lat
+                    lon           = $lon
+                    alt           = $GPSAlt[0].Value
+                    country       = CheckTranslate $locInfo.address.country
+                    place         = CheckTranslate $address
+                    date          = $dateStr
+                    monthYear     = $monthYear
+                    time          = $time
+                    orientation   = $orientation
+                    height        = $image.height
+                    width         = $image.width
+                    validLocation = $true
+                }
+            } else {
+                Write-Verbose "EXIF data dpresenet, but no location data"
+                return [ExifDataSet]@{
+                    path          = $path
+                    lat           = 0
+                    lon           = 0
+                    alt           = 0
+                    country       = ''
+                    place         = ''
+                    date          = $dateStr
+                    monthYear     = $monthYear
+                    time          = $time
+                    orientation   = 0
+                    height        = $image.height
+                    width         = $image.width
+                    validLocation = $false
+                }
+            }
+        } # try to read and convert EXIF data
+        catch {
+            Write-Warning "ERROR converting EXIF data from $imagePath, error message was`r`n $($_.Exception.Message)"
+        }
+    } else {
+        # image doesn't contain EXIF data, so use file create date
+        try {
+            $fileCreationDate = (Get-item -Path $path).CreationTime
+            $dateStr   = $fileCreationDate.ToString('yyyy-MM-dd HH:mm:ss')
+            $monthYear = $fileCreationDate.ToString('MMMM yyyy')   
+            $time      = $fileCreationDate.ToShortTimeString()
+        } 
+        catch {
+            $dateStr   = ''
+            $monthYear = ''   
+            $time      = ''
+        }
+
+        return [ExifDataSet]@{
+            path          = $path
+            lat           = 0
+            lon           = 0
+            alt           = 0
+            country       = ''
+            place         = ''
+            date          = $dateStr
+            monthYear     = $monthYear
+            time          = $time
+            orientation   = 0
+            height        = $image.height
+            width         = $image.width
+            validLocation = $false
+        }
+    }
+}
+
+# create a semicolon-separated text file containing GPS date and location information for all processed pictures
+# if the translationFile script parameter is given but the translation file does not yet exist,
+# also creates this file, so that the user can later edit it
+# parameters:
+#   sourcePath      path containing the picture files to analyze
+#   inputFiles      array of filenames of the files to be analyzed
+#   gpsFile         name of the file mapping file names to GPS information read from their EXIF data
+#   translationFile name of translation file if specified
+# returns nothing, but writes a text file, and optionally a translation file
+function WriteGpsFile ([ExifDataSet[]] $imageData, [string] $gpsFile, [string] $translationFile) {
+    if (-not $script:newGpsEntries) {
+        Write-Verbose "GPS file unchanged, so skip"
+        return
+    }
+    $count = 0 # for progress bar
+    '#path;filename;date;orientation;latitude;longitude;altitude;country;place;pxheight;pxwidth' | Out-File $gpsFile -Force -Encoding utf8
+    # iterate through all images' EXIF data,
+    $imageData | Sort-Object path | ForEach-Object {
+        $count++
+        Write-Progress -Id 1 -PercentComplete $($count * 100 / $imageData.Count) -Status "$imageFileName ($count of $($imageData.Count))" -Activity 'creating GPS file'
+        Write-Verbose "Creating GPS file entry for $($_.path)"
+        # write entry into text file, the file contains the following fields:
+        #   path;date;orientation;latitude;longitude;altitude;country;place;imageheight;imagewidth
+        #     0       1       2     3         4         5         6       7        8       9        
+        $_.path,$_.date,$_.orientation,$_.lat,$_.lon,$_.alt,$_.country,$_.place,$_.height,$_.width -join ";" | Out-File $gpsFile -Append -Encoding utf8
+    }
+    Write-Progress -Id 1 -Activity 'creating GPS file' -Completed
+}
+function WriteTranslationFile ([string] $translationFile) {
+    # only wrte file if we have new entries
+    if (-not $script:translation.containsvalue('«new»')) {
+        return
+    }
+    # write the original entries first, sorted alphabetically
+    # the second <placename> may then be edited by the user
+    '#GPS name;translated name' | Out-File $translationFile -Force -Encoding utf8
+    foreach ($original in ($translation.Keys | Sort-Object)) {
+        if ($script:translation[$original] -ne '«new»') {
+            "$original;$($script:translation[$original])" | Out-File $translationFile -Append -Encoding utf8
+        }
+    }
+    # now write the new entries in the format <placename>;<placename>
+    # the second <placename> may then be edited by the user
+    "#new entries created $(Get-Date)" | Out-File $translationFile -Append -Encoding utf8
+    foreach ($original in ($script:translation.Keys | Sort-Object)) {
+        if ($script:translation[$original] -eq '«new»') {
+            "$original;$original" | Out-File $translationFile -Append -Encoding utf8
+        }
+    }
+}    
+
+# read all JPG files in a given folder and collect their EXIF data into an array
+# if a file doesn't have EXIF data, use the OS file creation date
+# reads GPS file if given and skips double entries
+function GetSourceFileData ([string] $sourceFolder, [string] $gpsFile, [bool] $recurse) {
+    $ExifData = @{}  # hashtable of EXIF data, indexed by file path
+    $count = 0             # for progress bar
+    # names of files to extract EXIF data
+    if ($recurse) {
+        Write-Verbose "reading files from folder $sourceFolder and subfolders"
+        $sourceFileNames = (Get-ChildItem $sourceFolder -Recurse -File -Include '*.jpeg','*.jpg' | Select-Object -Property FullName).FullName | Where-Object -FilterScript {$_ -like '*.jpg' -or $_ -like '*.jpeg'}
+    } else {
+        $sourceFileNames = (Get-ChildItem $sourceFolder -File -Include '*.jpeg','*.jpg' | Select-Object -Property FullName).FullName | Where-Object -FilterScript {$_ -like '*.jpg' -or $_ -like '*.jpeg'}
+    }
+    Write-Verbose "$($sourceFileNames.count) file names read."
+    $script:newGpsEntries = $false
+    # check if GPS file given and existing
+    if ('' -ne $gpsFile -and (Test-Path $gpsFile)) {
+        # yes, so pre-populate hashtable with data from pictures
+        # which we have read in a previous run
+        $gpsLines = Get-Content -Path $gpsFile -Encoding utf8
+        $gpsLines | ForEach-Object {
+            if ($_ -ne '' -and $_[0] -ne '#') {
+                $path, $exifLine = $_ -split ';', 2
+                if ('' -ne $path) {
+                    Write-Verbose "[$path] <-- $exifLine (existing)"
+                    $ExifData["$path"] = [ExifDataSet]::new("$path;$exifLine")
+                }
+            }
+        }
+    }
+    # now iterate all image files, except those whith existing entries
+    $changedCounter = 0
+    $sourceFileNames | ForEach-Object {
+        $count++
+        $changedCounter++
+        Write-Verbose "analysing $count ($_)"
+        if ($changedCounter % 50 -eq 0) {
+            # dump tranlation and GPS files every 100 images
+            # to preserve some data in case the script is aborted
+            Write-Verbose "dumping data at count $count"
+            WriteGpsFile $ExifData.Values $gpsFile $script:translationFile
+            WriteTranslationFile $script:translationFile
+        }
+        if ($ExifData.Keys -notcontains $_) {
+            if ($_.Length -ge 50) {
+                $displayString = '...' + $_.Substring($_.Length-47)
+            } else {
+                $displayString = $_
+            }
+            Write-Progress -Id 1 -PercentComplete $($count * 100 / $sourceFileNames.Count) -Status " from $displayString ($count of $($sourceFileNames.Count))" -Activity 'getting EXIF data'
+            $imageExifData = (Get-ExifData $_)
+            if ($null -ne $imageExifData) {
+                $script:newGpsEntries = $true
+                Write-Verbose "[$_] <-- $_;$imageExifData"
+                $ExifData[$_] += $imageExifData
+            }
+        }
+    }
+    Write-Progress -Id 1 -Activity 'getting EXIF data' -Completed
+    return $ExifData.Values | Sort-Object -Property date
 }
 
 # if a translation file exists, load it into a hash table
 function LoadTranslationFile ([string] $translationFile) {
     if (Test-Path $translationFile) {
-        foreach ($line in Get-Content -Path $translationFile) {
+        foreach ($line in Get-Content -Path $translationFile -Encoding utf8) {
             if ('' -ne $line -and $line[0] -ne '#') {
                 try {
                     $orig, $trans = $line -split ';'
@@ -286,28 +589,9 @@ function LoadTranslationFile ([string] $translationFile) {
             }
         }
     } else {
-        $translation = @{}
+        $script:translation = @{}
     }
 }
-
-function SaveTranslationFile ([string] $translationFile) {
-    # write the original entries first, sorted alphabetically
-    # the second <placename> may then be edited by the user
-    '#GPS name;translated name' | Out-File $translationFile -Force
-    foreach ($original in ($translation.Keys | Sort-Object)) {
-        if ($translation[$original] -ne '«new»') {
-            "$original;$($translation[$original])" | Out-File $translationFile -Append
-        }
-    }
-    # now write the new entries in the format <placename>;<placename>
-    # the second <placename> may then be edited by the user
-    "#new entries created $(Get-Date)" | Out-File $translationFile -Append
-    foreach ($original in ($translation.Keys | Sort-Object)) {
-        if ($translation[$original] -eq '«new»') {
-            "$original;$original" | Out-File $translationFile -Append
-        }
-    }
-}    
 
 # translate a string according to the translation table
 # parameters:
@@ -322,8 +606,8 @@ function CheckTranslate ([string] $text) {
         return $transText
     } else {
         # add entry if not already result of a translation
-        if ($translation.Values -notcontains $text) {
-            $translation[$text] = '«new»'
+        if ($script:translation.Values -notcontains $text) {
+            $script:translation[$text] = '«new»'
         }
         return $text
     }
@@ -337,35 +621,57 @@ function CheckTranslate ([string] $text) {
 #   renameFormat    a string with field placeholders. Characters not being placeholders
 #                   will appear in the filename
 # returns new filename, preserving path and extension
-function RenamedFilePath ([ExifDataSet] $exifData, [string] $renameFormat, [string] $originalPath) {
+function RenamedFilePath ([ExifDataSet] $exifData, [string] $renameFormat, [string] $destinationPath) {
     if ($renameFormat -match ',|;|\*|\"|\/|\\|\<|\>|\:|\||\?') {
         throw ("illegal character in renameFormat $renameFormat. Use only characters allowed in file names")
     }
     # construct strings for the -f operator, e.g if we want a filename like 'year-place', then the format string should
-    # be '{0}-{3}'
-    $textFormatString = $renameFormat -replace 'y','{0}' -replace 'm','{1}' -replace 'd','{2}'-replace 'p','{3}'-replace 'c','{4}'
-    # preserve the file directory and extension
-    $path = Split-Path $originalPath -Parent
-    $ext = Split-Path $originalPath -Extension
+    # be '{0}-{4}'
+    $replaceTable = @{
+        '!year'    = '{0}'
+        '!yy'      = '{1}'
+        '!month'   = '{2}'
+        '!day'     = '{3}'
+        '!place'   = '{4}'
+        '!country' = '{5}'
+    }
+
+    $textFormatString = $renameFormat
+    $replaceTable.GetEnumerator() | ForEach-Object {
+        $textFormatString = $textFormatString -replace $_.Key,$_.Value
+    }
+     # preserve the extension
+    $ext = Split-Path $exifData.path -Extension
     # create file name classifier (e.g. '2025-Rome', taking above example)
-    $filename = $textFormatString -f `
-        $exifData.date.Substring(0,4), `
-        $exifData.date.Substring(5,2), `
-        $exifData.date.Substring(8,2), `
-        $exifData.place, $exifData.country
+    if ('' -ne $exifData.date) {
+        $filename = $textFormatString -f `
+            $exifData.date.Substring(0,4), `
+            $exifData.date.Substring(2,2), `
+            $exifData.date.Substring(5,2), `
+            $exifData.date.Substring(8,2), `
+            $exifData.place, $exifData.country
+    } else {
+        $filename = $textFormatString -f `
+            '', `
+            '', `
+            '', `
+            '', `
+            $exifData.place, $exifData.country
+    }
     # now, generate a counter. Counters start at 1 for each individual file name classifier
-    if ($renameCounterTable.Keys -contains $filename) {
+    if ($script:renameCounterTable.Keys -contains $filename) {
         # another filename with this classifier already exists, so increment counter
-        $renameCounterTable[$fileName]++
+        $script:renameCounterTable[$filename]++
     } else {
         # we have not yet seen a filename with this classifier, so start with 1
-        $renameCounterTable[$fileName] = 1
+        $script:renameCounterTable[$filename] = 1
     }
     # add the counter the filename as four-digit zero-padded value
-    $filename += "{0:d3}" -f ($renameCounterTable[$fileName])
-    Write-Verbose "renaming $originalPath to $filename using format $renameFormat"
+    $filename += "{0:d3}" -f ($script:renameCounterTable[$filename])
+    $filename = $filename -replace '-{2,}','-'
+    Write-Verbose "renaming $originalPath to $filename.$ext using format $renameFormat"
     # return filename including path and extension
-    return "$path\$filename$ext"
+    return "$destinationPath\$filename$ext"
 }
 
 # EXIF data gives us decimal values, e.g. 41.9019961, but we want
@@ -414,14 +720,34 @@ function DecimalToDegree([double] $angle, [char] $orientation = ' ') {
 # returns a string where placeholders in the textformat string are replaced by the
 # actual data while other parts are preserved unchanged, e.g. a string like
 # 'Place:!place-!country(c) by Me' returns a string like 'Place:Roma-Italy(c) by Me'
+# note that textFormat may be empty, or that the exif location date may be invalid
 function ExifToText ([ExifDataSet] $exifData, [string] $textFormat) {
+    # textFormat may be empty, i.e. user does not want to add text,
+    # but maybe the file should be renamed, so process this file anyway
+    if ('' -eq $textFormat) {
+        return ''
+    }
     # prepare format string
-    $textFormatString = $textFormat -replace '!file','{0}' -replace '!date','{1}' -replace '!orien','{2}' `
-                            -replace '!lat','{3}' -replace '!lon','{4}' -replace '!alt','{5}' `
-                            -replace '!country','{6}' -replace '!place','{7}' -replace '!monthyear','{8}' `
-                            -replace '!time','{9}'
+    $replaceTable = @{
+        '!file'      = '{0}'
+        '!date'      = '{1}'
+        '!orien'     = '{2}'
+        '!lat'       = '{3}'
+        '!lon'       = '{4}'
+        '!alt'       = '{5}'
+        '!country'   = '{6}'
+        '!place'     = '{7}'
+        '!monthyear' = '{8}'
+        '!time'      = '{9}'
+    }
+    # the last 'replace' deals with special case: user may have used a format like "...!date (!place)...",
+    # resulting in a string like "03.03.2025 ()", so we remove possible empty parentheses
+    $textFormatString = $textFormat
+    $replaceTable.GetEnumerator() | ForEach-Object {
+        $textFormatString = $textFormatString -replace $_.Key,$_.Value
+    }
     $text = $textFormatString -f `
-                $exifData.fileName, `
+                (Split-Path -Path $exifData.path -Leaf), `
                 $exifData.date, `
                 $exifData.orientation, `
                 (DecimalToDegree $exifData.lat 'B'), `
@@ -431,56 +757,68 @@ function ExifToText ([ExifDataSet] $exifData, [string] $textFormat) {
                 $exifData.place, `
                 $exifData.monthYear, `
                 $exifData.time
-    return $text
+    return ($text -replace '\(\)','')
+
 }
 
 # writes a text string into a picture file
 # parameters:
-#   sourceImageFolder   folder where the picture file is located
 #   sourceImageFileName name of the picture file
 #   exifData            data extracted from the picture file
 #   destinationFolder   folder where the annotated picture will be placed
 #   textFormat          string specifying which EXIF data will be written into the picture.
 #   maxTextPercent      maximal length of the text in relation to the picture width
 # returns nothing, but writes a picture file into the destination folder
-function AddExifDataToImage ([string] $sourceImageFolder, [string] $sourceImageFileName, [ExifDataSet] $exifData, [string] $destinationFolder, [string] $textFormat, [int] $maxTextPercent) {
-    $text = ExifToText $exifData $textFormat
-    $sourceImagePath = "$sourceImageFolder\$sourceImageFileName"
-    $destinationImagePath = "$destinationFolder\$sourceImageFileName"
+# if the textformat or the resulting text are empty, nothing is added to the image
+#function AddExifDataToImage ([string] $sourceImageFolder, [string] $sourceImageFileName, [ExifDataSet] $exifData, [string] $destinationFolder, [string] $textFormat, [int] $maxTextPercent) {
+function AddExifDataToImage ([ExifDataSet] $exifData, [string] $destinationFolder, [string] $textFormat, [int] $maxTextPercent) {
+    if ('' -ne $textFormat) {
+        $text = ExifToText $exifData $textFormat
+    } else {
+        $text = ''
+    }
+    # ignore if file does not exist
+    if (-not (Test-Path $exifData.path)) {
+        exit
+    }
+    if ($renameFormat -ne '') {
+        $destinationImagePath = RenamedFilePath $exifData $renameFormat $destinationFolder
+        Write-Verbose "file $($exifData.path) will be renamed to $destinationImagePath"
+    }
     try {
-        $bitmap = [System.Drawing.Bitmap]::FromFile($sourceImagePath)
+        $bitmap = [System.Drawing.Bitmap]::FromFile($exifData.path)
     }
     catch {
         return
     }
-    Write-Verbose "writing $text on file $sourceImageFileName with destination $destinationFolder"
-    # Create a graphics object
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 
-    # Define font, text, and position
-    $fontSize = 100 # initial value
-    $font = New-Object System.Drawing.Font("Arial", $fontSize, [System.Drawing.FontStyle]::Bold)
-    $imageWidth = $graphics.VisibleClipBounds.Width
-    #$textWidth = ($graphics.MeasureString($text, $font, $imageWidth)).Width
-    $textWidth = ($graphics.MeasureString($text, $font, 100000)).Width
-    #redefine font with adjusted size    
-    if ($textWidth -gt ($maxTextPercent * $imageWidth / 100)) {
-        $fontSize = [math]::Floor($maxTextPercent * $imageWidth / $textWidth)
-    }
-    $font = New-Object System.Drawing.Font("Arial", $fontSize, [System.Drawing.FontStyle]::Bold)
-    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::Yellow)
-    $position = New-Object System.Drawing.PointF($0, 0)
+    if ('' -ne $text) {
+        Write-Verbose "writing $text on file $($exifData.path) with destination $destinationImagePath"
+        # Create a graphics object
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
 
-    # Draw the information text on the image
-    $graphics.DrawString($text, $font, $brush, $position)
+        # Define font, text, and position
+        $fontSize = 100 # initial value
+        $font = New-Object System.Drawing.Font("Arial", $fontSize, [System.Drawing.FontStyle]::Bold)
+        $imageWidth = $graphics.VisibleClipBounds.Width
+        $textWidth = ($graphics.MeasureString($text, $font, 100000)).Width
+        #redefine font with adjusted size    
+        if ($textWidth -gt ($maxTextPercent * $imageWidth / 100)) {
+            $fontSize = [math]::Floor($maxTextPercent * $imageWidth / $textWidth)
+        }
+        $font = New-Object System.Drawing.Font("Arial", $fontSize, [System.Drawing.FontStyle]::Bold)
+        $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::Yellow)
+        $position = New-Object System.Drawing.PointF($0, 0)
 
-    if ($renameFormat -ne '') {
-        $destinationImagePath = RenamedFilePath $exifData $renameFormat $destinationImagePath
-        Write-Verbose "rename file to $destinationImagePath"
+        # Draw the information text on the image
+        $graphics.DrawString($text, $font, $brush, $position)
+        $graphics.Dispose()
+    } else {
+        Write-Verbose "no text to add"
     }
     try {
         # Save the modified image
-        Write-Verbose "writing file from source $sourceImagePath to $destinationImagePath"
+        Write-Verbose "writing file $($exfData.path) to $destinationImagePath"
         $bitmap.Save($destinationImagePath, [System.Drawing.Imaging.ImageFormat]::Jpeg)
     }
     catch {
@@ -488,169 +826,60 @@ function AddExifDataToImage ([string] $sourceImageFolder, [string] $sourceImageF
         exit
     }
     finally {
-        # Dispose of graphics and bitmap objects
-        $graphics.Dispose()
         $bitmap.Dispose()
     }
-}
-
-# read EXIF data from a picture file
-# parameters:
-#   imagePath   path and filename of the picture to read from
-# returns EXIF data from picture. If EXIF data is not found or invalid,
-# the field isValid will be $false
-function Get-ExifData ([string] $imagePath) {
-    try {
-        $image = New-Object -ComObject Wia.ImageFile
-        $image.LoadFile($imagePath)
-        $orientation = ($image.properties | Where-Object -Property Name -eq 'Orientation').Value       
-        $GPSLat = @(($image.Properties | Where-Object -Property Name -eq 'GpsLatitude').Value)
-        $GPSLon = @(($image.Properties | Where-Object -Property Name -eq 'GpsLongitude').Value)
-        $GPSAlt = @(($image.Properties | Where-Object -Property Name -eq 'GpsAltitude').Value)
-        $DtString = @(($image.Properties | Where-Object -Property Name -eq 'DateTime').Value)
-        $lat = $GPSLat[0].Value + $GPSLat[1].Value/60 + $GPSLat[2].Value/3600
-        $lon = $GPSLon[0].Value + $GPSLon[1].Value/60 + $GPSLon[2].Value/3600
-        $dt = [datetime]::ParseExact($DtString, 'yyyy:MM:dd HH:mm:ss',$null)
-        if (@(($image.Properties | Where-Object -Property Name -eq 'GpsLatitudeRef').Value) -eq 'S') {
-            $lat = -$lat
-        }
-        if (@(($image.Properties | Where-Object -Property Name -eq 'GpsLongitudeRef').Value) -eq 'W') {
-            $lon = -$lon
-        }
-        if ($Lat -ne 0 -and $Lon -ne 0) {
-            $r=Invoke-WebRequest -uri "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lon&format=json&namedetails=1"
-            $locInfo = $r.RawContent -split '\r\n' | Where-Object ({$_ -like '{*'}) | ConvertFrom-Json
-#        if ($null -eq $locInfo.error) {
-            $address = ''
-            if ($null -ne $locInfo.address.city) {
-                $address = $locInfo.address.city
-            } elseif  ($null -ne $locInfo.address.town) {
-                $address = $locInfo.address.town
-            } elseif  ($null -ne $locInfo.address.village) {
-                $address = $locInfo.address.village
-            } elseif  ($null -ne $locInfo.address.suburb) {
-                $address = $locInfo.address.suburb
-            } elseif ($null -ne $locInfo.error) {
-                # there is no geo information for these coordinates
-                $address = "{0}, {1}" -f (DecimalToDegree $lat 'B'), (DecimalToDegree $lon 'L')
-            }
-            Write-Verbose "location for lat=$lat, lon=$lon is $address"
-            return [ExifDataSet]@{
-                fileName    = ($imagePath -split '\\')[-1]
-                lat         = $lat
-                lon         = $lon
-                alt         = $GPSAlt[0].Value
-                country     = CheckTranslate $locInfo.address.country
-                place       = CheckTranslate $address
-                date        = $DtString[0]
-                monthYear   = $dt.ToString('MMMM yyyy')
-                time        = $dt.ToShortTimeString()
-                orientation = $orientation
-                height      = $image.height
-                width       = $image.width
-                isValid     = $true
-            }
-        }
-        else {
-            return [ExifDataSet]::new()
-        }
-    }
-    catch {
-        return [ExifDataSet]::new()
-    }
-}
-
-# create a semicolon-separated text file containing GPS date and location information for all processed pictures
-# if the translationFile script parameter is given but the translation file does not yet exist,
-# also creates this file, so that the user can later edit it
-# parameters:
-#   sourcePath      path containing the picture files to analyze
-#   inputFiles      array of filenames of the files to be analyzed
-#   gpsFile         name of the file mapping file names to GPS information read from their EXIF data
-#   translationFile name of translation file if specified
-# returns nothing, but writes a text file, and optionally a translation file
-function CreateGpsFile ([string] $sourcePath, [string[]] $inputFiles, [string] $gpsFile, [string] $translationFile) {
-    $count = 0 # for progress bar
-    # write the header for the GPS file
-    '#path;filename;date;orientation;latitude;longitude;altitude;country;place;pxheight;pxwidth' | Out-File $gpsFile -Force
-    LoadTranslationFile $translationFile
-    # iterate through all source pictures
-    foreach ($imageFileName in $inputFiles) {
-        $count++
-        Write-Progress -Id 1 -PercentComplete $($count * 100 / $inputFiles.Count) -Status "$imageFileName ($count of $($inputFiles.Count))" -Activity 'getting EXIF data'
-        $exifData = Get-ExifData "$sourcePath\$imageFileName"
-        if ($exifData.isValid) {
-            Write-Verbose "Creating GPS file entry for $imageFileName"
-            # write entry into text file, the file contains the following fields:
-            #   folder;filename;date;orientation;latitude;longitude;altitude;country;place;imageheight;imagewidth
-            #       0       1       2     3         4         5         6       7        8     9         10
-            $sourcePath,$imageFileName,$exifData.date,$exifData.orientation,$exifData.lat,$exifData.lon,$exifData.alt,$exifData.country,$exifData.place,$exifData.height,$exifData.width -join ";" | Out-File $gpsFile -Append
-        } else {
-            Write-Warning -message "$imageFileName - no geolocation data"
-        }
-    }
-    SaveTranslationFile $translationFile
-    Write-Progress -Id 1 -Activity 'getting EXIF data' -Completed
 }
 
 # if the user has edited the translation file, then it can be run against the GPS file,
 # replacing all place names with their translated versions
 function ApplyTranslationToGpsFile ([string] $gpsFile, [string] $translationFile) {
     $translatedGpsText = @()
-    foreach ($line in (Get-Content -Path $gpsFile)) {
-        foreach ($key in $translation.Keys) {
-            $line = $line -replace $key,$translation[$key]
-        }
-        $translatedGpsText += $line
+    foreach ($line in (Get-Content -Path $gpsFile -Encoding utf8)) {
+        $exifData = ($line -split ';')
+        $exifData[7] = CheckTranslate $exifData[7] # country
+        $exifData[8] = CheckTranslate $exifData[8] # place
+        $translatedGpsText += ($exifData -join ';')
     }
-    $translatedGpsText | Out-File $gpsFile -Force
+    $translatedGpsText | Out-File $gpsFile -Force  -Encoding utf8
 }
 
 # apply the data in the GPS file to the picture files
 # parameters:
-#   gpsFilePath         path and name of source file
+#   gpsFilePath         path and name of GPS file
 #   destinationFolder   folder where the annotated picture is written to
 #   textFormat          template specifying the format of the text which will
 #                       be written into the picture
 #   maxTextPercent      max width of the text in relation to the picture width
 # returns   nothing, but writes a picture file into the destination folder
 function ApplyGpsFile ([string] $gpsFilePath, [string] $destinationFolder, [string] $textFormat, [int] $maxTextPercent) {
+    $count = 0
+    $exifData = @()
     try {
-        $lineCount = (Get-Content $gpsFilePath -ErrorAction Stop | Measure-Object -Line).Lines
+        foreach ($line in (Get-Content -Path $gpsFilePath -Encoding utf8)) {
+            if ($line -ne '' -and $line[0] -ne '#') {
+                $exifData += [ExifDataSet]::new("$line")
+            } # if line not empty
+        }
     }
     catch {
         "GPS file $gpsFilePath not found, aborting program" | Out-Host
         exit
     }
-    $count = 0
-    foreach ($line in (Get-Content -Path $gpsFilePath)) {
+    $exifData | Sort-Object -Property date | ForEach-Object {
         $count++
-        if ($line -ne '' -and $line[0] -ne '#') {
-            $folder, $filename, $exifLine = $line -split ';', 3
-            Write-Progress -Id 1 -PercentComplete $($count * 100 / $lineCount) -Status "$filename ($count of $lineCount))" -Activity 'processing GPS file'
-            $exifLine = "$filename;$exifLine"
-            $exifData = [ExifDataSet]::new($exifLine)
-            if ($exifData.isValid) {
-                Write-Verbose "applying GPS file entry: $line"
-                AddExifDataToImage $folder $filename $exifData $destinationFolder $textFormat $maxTextPercent
-            } else {
-                Write-Warning -message "$imageFileName - no geolocation data in GPS file"
-            }
-        } # if line not empty
+        Write-Progress -Id 1 -PercentComplete $($count * 100 / $exifData.count) -Status "processing $($exifData.path) ($count of $$(exifData.count))" -Activity 'processing GPS file'
+        AddExifDataToImage $_ $destinationFolder $textFormat $maxTextPercent
     }
     Write-Progress -Id 1 -Activity 'processing GPS file' -Completed
 }
 
 # write EXIF data from pictures into the pictures directly, not using a GPS file
-function AddGpsLocationDirect ([string] $sourcePath, [string[]] $sourceFiles, [string] $translationFile, [string] $destination, [string] $textFormat, [int] $maxTextPercent) {
+function Add-GpsLocationDirect ([string] $sourcePath, [ExifDataSet[]] $imageData, [string] $translationFile, [string] $destination, [string] $textFormat, [int] $maxTextPercent) {
     $count = 0
-    foreach ($imageFileName in $sourceFiles) {
+    $imageData | ForEach-Object {
         $count++
-        Write-Progress -Id 1 -PercentComplete $($count * 100 / $sourceFiles.Count) -Status "$imageFileName ($count of $($sourceFiles.Count))" -Activity 'adding EXIF data to image'
-        $exifData = Get-ExifData "$sourcePath\$imageFileName"
-        if ($exifData.lat -ne 0) {
-            AddExifDataToImage $sourcePath $imageFileName $exifData $destination $textFormat $maxTextPercent
-        }
+        Write-Progress -Id 1 -PercentComplete $($count * 100 / $imageData.Count) -Status "$_.path ($count of $($imageData.Count))" -Activity 'adding EXIF data to image'
+        AddExifDataToImage $_ $destination $textFormat $maxTextPercent
     }
     Write-Progress -Id 1 -Activity 'adding EXIF data to image' -Completed
 }
@@ -662,40 +891,44 @@ function AddGpsLocationDirect ([string] $sourcePath, [string[]] $sourceFiles, [s
 
 Add-Type -Assembly System.Drawing
 
-# initialize translation table
+# global variables
 $translation = @{}
+$newGpsEntries = $false
+#[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'existModuleName', Justification = 'variable is used in another scope')]
+$renameCounterTable = @{}
+
+# initialize translation table
 if ('' -ne $translationFile) {
     LoadTranslationFile $translationFile
 }
 # initialize the table we may need if we want to generate filenames automatically
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', 'existModuleName', Justification = 'variable is used in another scope')]
-$renameCounterTable = @{}
 
 Write-Verbose $PSCmdlet.ParameterSetName
 
 switch ($PSCmdlet.ParameterSetName) {
     'CreateGpsFile' {
-        $sourcePath = Split-Path $source -Parent | Resolve-Path
-        $sourceFiles = (Get-ChildItem $sourcePath -File | Select-Object -Property Name).Name | Where-Object -FilterScript {$_ -like '*.jpg' -or $_ -like '*.jpeg'}
+        LoadTranslationFile $translationFile
+        $sourceFileData = GetSourceFileData $source $gpsFile $recurse
         Write-Verbose "Create GPS file $gpsFile from source $sourcePath, $($sourceFiles.Count) files to process"
-        CreateGpsFile $sourcePath $sourceFiles $gpsFile $translationFile
+        WriteTranslationFile $translationFile
+        WriteGpsFile $sourceFileData $gpsFile $translationFile
         break
     }
     'ApplyTranslationToGpsFile' {
-        write-verbose "Apply translation file $translationFile to GPS file $gpsfile"
+        LoadTranslationFile $translationFile
+        Write-verbose "Apply translation file $translationFile to GPS file $gpsfile"
         ApplyTranslationToGpsFile $gpsFile $translationFile
         break
     }
     'ApplyGpsFile' {
-        write-verbose "Apply GPS file $gpsfile and translation file $translationFile, writing images to $destination"
+        LoadTranslationFile $translationFile
+        Write-verbose "Apply GPS file $gpsfile and translation file $translationFile, writing images to $destination"
         ApplyGpsFile $gpsFile $destination $textFormat $maxTextPercent
         break
     }
     'AddGpsLocationDirect' {
-        $sourcePath = Split-Path $source -Parent | Resolve-Path
-        $sourceFiles = (Get-ChildItem $sourcePath -File | Select-Object -Property Name).Name
-        AddGpsLocationDirect $sourcePath $sourceFiles $translationFile $destination $textFormat $maxTextPercent
+        $sourceFileData = GetSourceFileData $source '' $recurse
+        Add-GpsLocationDirect $source $sourceFileData $translationFile $destination $textFormat $maxTextPercent
         break
     }
 }
-"DONE."
